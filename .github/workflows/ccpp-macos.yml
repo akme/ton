@@ -1,0 +1,30 @@
+name: C/C++ CI MacOS
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: macOS-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: submodules
+      run: |
+        ls
+        cd ton
+        git submodule update --init --recursive
+    - name: install deps
+      run: |
+        brew install cmake openssl 
+    - name: mkdir
+      run: |
+        mkdir build
+    - name: cmake
+      run: | 
+        cd build
+        cmake .. -DOPENSSL_ROOT_DIR=$(brew --prefix)/opt/openssl
+    - name: make -j4
+      run: |
+        cd build
+        make -j4
