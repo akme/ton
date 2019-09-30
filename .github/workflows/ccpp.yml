@@ -14,15 +14,14 @@ jobs:
         ls
         cd ton
         git submodule update --init --recursive
-        cd ..
     - name: mkdir
       run: |
         mkdir build
     - name: cmake
       run: | 
-        pwd
-        ls
         cd build
         cmake ..
     - name: make -j2
-      run: make -j2
+      run: |
+        cd build
+        make -j2
