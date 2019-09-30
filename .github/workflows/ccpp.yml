@@ -13,7 +13,8 @@ jobs:
       run: |
         mkdir build
         cd build
+        pwd
     - name: cmake
-      run: cmake ..
+      run: cmake ../ton
     - name: make -j2
       run: make -j2
