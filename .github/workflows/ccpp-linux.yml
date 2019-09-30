@@ -21,7 +21,7 @@ jobs:
       run: | 
         cd build
         cmake ..
-    - name: make -j
+    - name: make -j4
       run: |
         cd build
-        make -j
+        make -j4
