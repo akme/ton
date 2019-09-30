@@ -9,7 +9,7 @@ jobs:
     
     steps:
     - uses: srt32/git-actions@v0.0.3
-    - args: git submodule update --init --recursive
+      args: git submodule update --init --recursive
     - name: mkdir
       run: |
         mkdir build
