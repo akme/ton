@@ -18,13 +18,11 @@ jobs:
     - name: mkdir
       run: |
         mkdir build
-        cd build
-        pwd
-        ls
     - name: cmake
       run: | 
         pwd
         ls
+        cd build
         cmake ..
     - name: make -j2
       run: make -j2
