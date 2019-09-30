@@ -5,10 +5,8 @@ on: [push]
 jobs:
   build:
 
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macOS-latest]
+    runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v1
     - name: submodules
@@ -23,7 +21,7 @@ jobs:
       run: | 
         cd build
         cmake ..
-    - name: make -j2
+    - name: make -j0
       run: |
         cd build
-        make -j2
+        make -j0
