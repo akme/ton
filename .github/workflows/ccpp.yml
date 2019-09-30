@@ -8,8 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: srt32/git-actions@v0.0.3
-      args: git submodule update --init --recursive
+    - uses: actions/checkout@v1
+    - name: submodules
+      run: |
+        cd ton
+        git submodule update --init --recursive
+        cd ..
     - name: mkdir
       run: |
         mkdir build
