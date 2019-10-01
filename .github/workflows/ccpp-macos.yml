@@ -31,4 +31,4 @@ jobs:
     - uses: actions/upload-artifact@master
       with:
         name: libtonlibjson.dylib
-        path: tonlib/libtonlibjson.dylib
+        path: build/tonlib/libtonlibjson.dylib
