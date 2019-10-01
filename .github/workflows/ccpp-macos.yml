@@ -28,3 +28,7 @@ jobs:
       run: |
         cd build
         make -j4
+    - uses: actions/upload-artifact@master
+      with:
+        name: libtonlibjson.dylib
+        path: tonlib/libtonlibjson.dylib
