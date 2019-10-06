@@ -162,10 +162,10 @@ TEST(Tonlib, TestWallet) {
 
   fift_output.source_lookup.write_file("/main.fif", load_source("smartcont/wallet.fif")).ensure();
   auto dest = block::StdAddress::parse("Ef9Tj6fMJP+OqhAdhKXxq36DL+HYSzCc3+9O6UNzqsgPfYFX").move_as_ok();
-  fift_output =
-      fift::mem_run_fift(std::move(fift_output.source_lookup),
-                         {"aba", "new-wallet", "Ef9Tj6fMJP+OqhAdhKXxq36DL+HYSzCc3+9O6UNzqsgPfYFX", "123", "321"})
-          .move_as_ok();
+  fift_output = fift::mem_run_fift(std::move(fift_output.source_lookup),
+                                   {"aba", "new-wallet", "Ef9Tj6fMJP+OqhAdhKXxq36DL+HYSzCc3+9O6UNzqsgPfYFX", "123",
+                                    "321", "-C", "TEST"})
+                    .move_as_ok();
   auto wallet_query = fift_output.source_lookup.read_file("wallet-query.boc").move_as_ok().data;
   auto gift_message = GenericAccount::create_ext_message(
       address, {}, TestWallet::make_a_gift_message(priv_key, 123, 321000000000ll, "TEST", dest));
@@ -428,6 +428,34 @@ TEST(Tonlib, ParseAddres) {
                                          make_object<tonlib_api::unpackedAccountAddress>(-1, false, false, raw)))
                        .move_as_ok();
   ASSERT_EQ("Uf9Tj6fMJP-OqhAdhKXxq36DL-HYSzCc3-9O6UNzqsgPfdyS", addr_str2->account_address_);
+}
+
+TEST(Tonlib, EncryptionApi) {
+  using tonlib_api::make_object;
+  Client client;
+
+  // init
+  sync_send(client, make_object<tonlib_api::init>(
+                        make_object<tonlib_api::options>(nullptr, make_object<tonlib_api::keyStoreTypeDirectory>("."))))
+      .ensure();
+
+  std::string password = "hello world";
+  std::string data = "very secret data";
+  auto key = std::move(
+      sync_send(client, make_object<tonlib_api::kdf>(td::SecureString(password), td::SecureString("salt"), 100000))
+          .move_as_ok()
+          ->bytes_);
+  auto encrypted = std::move(
+      sync_send(client, make_object<tonlib_api::encrypt>(td::SecureString(data), key.copy())).move_as_ok()->bytes_);
+  auto decrypted =
+      std::move(sync_send(client, make_object<tonlib_api::decrypt>(encrypted.copy(), key.copy())).move_as_ok()->bytes_);
+  ASSERT_EQ(data, decrypted);
+
+  auto bad_key = std::move(sync_send(client, make_object<tonlib_api::kdf>(td::SecureString(password + "BAD"),
+                                                                          td::SecureString("salt"), 100000))
+                               .move_as_ok()
+                               ->bytes_);
+  sync_send(client, make_object<tonlib_api::decrypt>(encrypted.copy(), bad_key.copy())).ensure_error();
 }
 
 TEST(Tonlib, KeysApi) {
