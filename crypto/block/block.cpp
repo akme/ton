@@ -718,12 +718,9 @@ td::Status ShardState::unpack_state(ton::BlockIdExt blkid, Ref<vm::Cell> prev_st
     return td::Status::Error(-666, "shardchain state for "s + blkid.to_str() +
                                        " corresponds to incorrect workchain or shard " + shard1.to_str());
   }
-  if (state.vert_seq_no) {
-    return td::Status::Error(
-        -666, "shardchain state for "s + blkid.to_str() + " has non-zero vert_seq_no, which is unsupported");
-  }
   id_ = blkid;
   root_ = std::move(prev_state_root);
+  vert_seqno_ = state.vert_seq_no;
   before_split_ = state.before_split;
   account_dict_ = std::make_unique<vm::AugmentedDictionary>(
       vm::load_cell_slice(std::move(state.accounts)).prefetch_ref(), 256, block::tlb::aug_ShardAccounts);
@@ -792,10 +789,11 @@ td::Status ShardState::unpack_state(ton::BlockIdExt blkid, Ref<vm::Cell> prev_st
       return td::Status::Error(-666, "ShardState of "s + id_.to_str() + " does not contain a valid global_balance");
     }
     if (extra.r1.flags & 1) {
-      if (extra.r1.block_create_stats->prefetch_ulong(8) != 0x17) {
+      if (extra.r1.block_create_stats->prefetch_ulong(8) == 0x17) {
+        block_create_stats_ = std::make_unique<vm::Dictionary>(extra.r1.block_create_stats->prefetch_ref(), 256);
+      } else {
         return td::Status::Error(-666, "ShardState of "s + id_.to_str() + " does not contain a valid BlockCreateStats");
       }
-      block_create_stats_ = std::make_unique<vm::Dictionary>(extra.r1.block_create_stats->prefetch_ref(), 256);
     } else {
       block_create_stats_ = std::make_unique<vm::Dictionary>(256);
     }
@@ -811,7 +809,7 @@ td::Status ShardState::unpack_out_msg_queue_info(Ref<vm::Cell> out_msg_queue_inf
   }
   out_msg_queue_ =
       std::make_unique<vm::AugmentedDictionary>(std::move(qinfo.out_queue), 352, block::tlb::aug_OutMsgQueue);
-  if (verbosity >= 3 * 0) {
+  if (verbosity >= 3 * 1) {
     LOG(DEBUG) << "unpacking ProcessedUpto of our previous block " << id_.to_str();
     block::gen::t_ProcessedInfo.print(std::cerr, qinfo.proc_info);
   }
@@ -953,14 +951,16 @@ td::Status ShardState::merge_with(ShardState& sib) {
   lt_ = std::max(lt_, sib.lt_);
   // 9. compute underload & overload history
   underload_history_ = overload_history_ = 0;
+  // 10. compute vert_seqno
+  vert_seqno_ = std::max(vert_seqno_, sib.vert_seqno_);
   // Anything else? add here
   // ...
 
-  // 10. compute new root
+  // 100. compute new root
   if (!block::gen::t_ShardState.cell_pack_split_state(root_, std::move(root_), std::move(sib.root_))) {
     return td::Status::Error(-667, "cannot construct a virtual split_state after a merge");
   }
-  // 11. invalidate sibling, change id_ to the (virtual) common parent
+  // 101. invalidate sibling, change id_ to the (virtual) common parent
   sib.invalidate();
   id_.id.shard = shard.shard;
   id_.file_hash.set_zero();
@@ -1746,7 +1746,7 @@ td::Status unpack_block_prev_blk_ext(Ref<vm::Cell> block_root, const ton::BlockI
   block::gen::ExtBlkRef::Record mcref;  // _ ExtBlkRef = BlkMasterInfo;
   ton::ShardIdFull shard;
   if (!(tlb::unpack_cell(block_root, blk) && tlb::unpack_cell(blk.info, info) && !info.version &&
-        block::tlb::t_ShardIdent.unpack(info.shard.write(), shard) && !info.vert_seq_no &&
+        block::tlb::t_ShardIdent.unpack(info.shard.write(), shard) &&
         (!info.not_master || tlb::unpack_cell(info.master_ref, mcref)))) {
     return td::Status::Error("cannot unpack block header");
   }
@@ -1810,6 +1810,9 @@ td::Status unpack_block_prev_blk_ext(Ref<vm::Cell> block_root, const ton::BlockI
   } else {
     mc_blkid = ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, mcref.seq_no, mcref.root_hash, mcref.file_hash};
   }
+  if (shard.is_masterchain() && info.vert_seqno_incr && !info.key_block) {
+    return td::Status::Error("non-key masterchain block cannot have vert_seqno_incr set");
+  }
   return td::Status::OK();
 }
 
@@ -1818,7 +1821,7 @@ td::Status check_block_header(Ref<vm::Cell> block_root, const ton::BlockIdExt& i
   block::gen::BlockInfo::Record info;
   ton::ShardIdFull shard;
   if (!(tlb::unpack_cell(block_root, blk) && tlb::unpack_cell(blk.info, info) && !info.version &&
-        block::tlb::t_ShardIdent.unpack(info.shard.write(), shard) && !info.vert_seq_no)) {
+        block::tlb::t_ShardIdent.unpack(info.shard.write(), shard))) {
     return td::Status::Error("cannot unpack block header");
   }
   ton::BlockId hdr_id{shard, (unsigned)info.seq_no};
@@ -1842,6 +1845,18 @@ td::Status check_block_header(Ref<vm::Cell> block_root, const ton::BlockIdExt& i
     *store_shard_hash_to = upd_hash.bits();
   }
   return td::Status::OK();
+}
+
+std::unique_ptr<vm::Dictionary> get_block_create_stats_dict(Ref<vm::Cell> state_root) {
+  block::gen::ShardStateUnsplit::Record info;
+  block::gen::McStateExtra::Record extra;
+  block::gen::BlockCreateStats::Record_block_create_stats cstats;
+  if (!(::tlb::unpack_cell(std::move(state_root), info) && info.custom->size_refs() &&
+        ::tlb::unpack_cell(info.custom->prefetch_ref(), extra) && (extra.r1.flags & 1) &&
+        ::tlb::csr_unpack(std::move(extra.r1.block_create_stats), cstats))) {
+    return {};
+  }
+  return std::make_unique<vm::Dictionary>(std::move(cstats.counters), 256);
 }
 
 std::unique_ptr<vm::AugmentedDictionary> get_prev_blocks_dict(Ref<vm::Cell> state_root) {

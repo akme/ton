@@ -26,6 +26,7 @@
 #include <ostream>
 #include "tl/tlblib.hpp"
 #include "td/utils/bits.h"
+#include "td/utils/CancellationToken.h"
 #include "td/utils/StringBuilder.h"
 #include "ton/ton-types.h"
 
@@ -384,7 +385,7 @@ struct ShardState {
   int global_id_;
   ton::UnixTime utime_;
   ton::LogicalTime lt_;
-  ton::BlockSeqno mc_blk_seqno_, min_ref_mc_seqno_;
+  ton::BlockSeqno mc_blk_seqno_, min_ref_mc_seqno_, vert_seqno_;
   ton::BlockIdExt mc_blk_ref_;
   ton::LogicalTime mc_blk_lt_;
   bool before_split_{false};
@@ -513,6 +514,9 @@ struct DiscountedCounter {
     return last_updated == other.last_updated && total == other.total && cnt2048 <= other.cnt2048 + 1 &&
            other.cnt2048 <= cnt2048 + 1 && cnt65536 <= other.cnt65536 + 1 && other.cnt65536 <= cnt65536 + 1;
   }
+  bool modified_since(ton::UnixTime utime) const {
+    return last_updated >= utime;
+  }
   bool validate();
   bool increase_by(unsigned count, ton::UnixTime now);
   bool fetch(vm::CellSlice& cs);
@@ -573,7 +577,7 @@ struct BlockProofChain {
   bool last_link_incomplete() const {
     return !links.empty() && last_link().incomplete();
   }
-  td::Status validate();
+  td::Status validate(td::CancellationToken cancellation_token = {});
 };
 
 int filter_out_msg_queue(vm::AugmentedDictionary& out_queue, ton::ShardIdFull old_shard, ton::ShardIdFull subshard);
@@ -627,6 +631,8 @@ td::Status unpack_block_prev_blk_try(Ref<vm::Cell> block_root, const ton::BlockI
                                      ton::BlockIdExt* fetch_blkid = nullptr);
 td::Status check_block_header(Ref<vm::Cell> block_root, const ton::BlockIdExt& id,
                               ton::Bits256* store_shard_hash_to = nullptr);
+
+std::unique_ptr<vm::Dictionary> get_block_create_stats_dict(Ref<vm::Cell> state_root);
 
 std::unique_ptr<vm::AugmentedDictionary> get_prev_blocks_dict(Ref<vm::Cell> state_root);
 bool get_old_mc_block_id(vm::AugmentedDictionary* prev_blocks_dict, ton::BlockSeqno seqno, ton::BlockIdExt& blkid,

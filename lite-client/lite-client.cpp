@@ -58,6 +58,8 @@
 #include "vm/continuation.h"
 #include "vm/cp0.h"
 #include "ton/ton-shard.h"
+#include "openssl/rand.hpp"
+#include "crypto/vm/utils.h"
 
 #if TD_DARWIN || TD_LINUX
 #include <unistd.h>
@@ -496,7 +498,7 @@ void TestNode::run_init_queries() {
   get_server_version(0x100);
 }
 
-std::string TestNode::get_word(char delim) {
+td::Slice TestNode::get_word(char delim) {
   if (delim == ' ' || !delim) {
     skipspc();
   }
@@ -505,10 +507,33 @@ std::string TestNode::get_word(char delim) {
     ptr++;
   }
   std::swap(ptr, parse_ptr_);
-  return std::string{ptr, parse_ptr_};
+  return td::Slice{ptr, parse_ptr_};
+}
+
+td::Slice TestNode::get_word_ext(const char* delims, const char* specials) {
+  if (delims[0] == ' ') {
+    skipspc();
+  }
+  const char* ptr = parse_ptr_;
+  while (ptr < parse_end_ && !strchr(delims, *ptr)) {
+    if (specials && strchr(specials, *ptr)) {
+      if (ptr == parse_ptr_) {
+        ptr++;
+      }
+      break;
+    }
+    ptr++;
+  }
+  std::swap(ptr, parse_ptr_);
+  return td::Slice{ptr, parse_ptr_};
 }
 
 bool TestNode::get_word_to(std::string& str, char delim) {
+  str = get_word(delim).str();
+  return !str.empty();
+}
+
+bool TestNode::get_word_to(td::Slice& str, char delim) {
   str = get_word(delim);
   return !str.empty();
 }
@@ -548,12 +573,12 @@ bool TestNode::parse_account_addr(ton::WorkchainId& wc, ton::StdSmcAddress& addr
   return block::parse_std_account_addr(get_word(), wc, addr) || set_error("cannot parse account address");
 }
 
-bool TestNode::convert_uint64(std::string word, td::uint64& val) {
+bool TestNode::convert_uint64(td::Slice word, td::uint64& val) {
   val = ~0ULL;
   if (word.empty()) {
     return false;
   }
-  const char* ptr = word.c_str();
+  const char* ptr = word.data();
   char* end = nullptr;
   val = std::strtoull(ptr, &end, 10);
   if (end == ptr + word.size()) {
@@ -564,12 +589,12 @@ bool TestNode::convert_uint64(std::string word, td::uint64& val) {
   }
 }
 
-bool TestNode::convert_int64(std::string word, td::int64& val) {
+bool TestNode::convert_int64(td::Slice word, td::int64& val) {
   val = (~0ULL << 63);
   if (word.empty()) {
     return false;
   }
-  const char* ptr = word.c_str();
+  const char* ptr = word.data();
   char* end = nullptr;
   val = std::strtoll(ptr, &end, 10);
   if (end == ptr + word.size()) {
@@ -580,7 +605,7 @@ bool TestNode::convert_int64(std::string word, td::int64& val) {
   }
 }
 
-bool TestNode::convert_uint32(std::string word, td::uint32& val) {
+bool TestNode::convert_uint32(td::Slice word, td::uint32& val) {
   td::uint64 tmp;
   if (convert_uint64(word, tmp) && (td::uint32)tmp == tmp) {
     val = (td::uint32)tmp;
@@ -590,7 +615,7 @@ bool TestNode::convert_uint32(std::string word, td::uint32& val) {
   }
 }
 
-bool TestNode::convert_int32(std::string word, td::int32& val) {
+bool TestNode::convert_int32(td::Slice word, td::int32& val) {
   td::int64 tmp;
   if (convert_int64(word, tmp) && (td::int32)tmp == tmp) {
     val = (td::int32)tmp;
@@ -628,6 +653,10 @@ int TestNode::parse_hex_digit(int c) {
     return c - 'a' + 10;
   }
   return -1;
+}
+
+bool TestNode::parse_hash(td::Slice str, ton::Bits256& hash) {
+  return str.size() == 64 && parse_hash(str.data(), hash);
 }
 
 bool TestNode::parse_hash(const char* str, ton::Bits256& hash) {
@@ -689,15 +718,15 @@ bool TestNode::parse_block_id_ext(std::string blkid_str, ton::BlockIdExt& blkid,
 }
 
 bool TestNode::parse_block_id_ext(ton::BlockIdExt& blk, bool allow_incomplete) {
-  return parse_block_id_ext(get_word(), blk, allow_incomplete) || set_error("cannot parse BlockIdExt");
+  return parse_block_id_ext(get_word().str(), blk, allow_incomplete) || set_error("cannot parse BlockIdExt");
 }
 
 bool TestNode::parse_hash(ton::Bits256& hash) {
   auto word = get_word();
-  return (!word.empty() && parse_hash(word.c_str(), hash)) || set_error("cannot parse hash");
+  return parse_hash(word, hash) || set_error("cannot parse hash");
 }
 
-bool TestNode::convert_shard_id(std::string str, ton::ShardIdFull& shard) {
+bool TestNode::convert_shard_id(td::Slice str, ton::ShardIdFull& shard) {
   shard.workchain = ton::workchainInvalid;
   shard.shard = 0;
   auto pos = str.find(':');
@@ -726,54 +755,6 @@ bool TestNode::convert_shard_id(std::string str, ton::ShardIdFull& shard) {
 
 bool TestNode::parse_shard_id(ton::ShardIdFull& shard) {
   return convert_shard_id(get_word(), shard) || set_error("cannot parse full shard identifier or prefix");
-}
-
-bool TestNode::parse_stack_value(td::Slice str, vm::StackEntry& value) {
-  if (str.empty() || str.size() > 65535) {
-    return false;
-  }
-  int l = (int)str.size();
-  if (str[0] == '"') {
-    vm::CellBuilder cb;
-    if (l == 1 || str.back() != '"' || l >= 127 + 2 || !cb.store_bytes_bool(str.data() + 1, l - 2)) {
-      return false;
-    }
-    value = vm::StackEntry{vm::load_cell_slice_ref(cb.finalize())};
-    return true;
-  }
-  if (l >= 3 && (str[0] == 'x' || str[0] == 'b') && str[1] == '{' && str.back() == '}') {
-    unsigned char buff[128];
-    int bits =
-        (str[0] == 'x')
-            ? (int)td::bitstring::parse_bitstring_hex_literal(buff, sizeof(buff), str.begin() + 2, str.end() - 1)
-            : (int)td::bitstring::parse_bitstring_binary_literal(buff, sizeof(buff), str.begin() + 2, str.end() - 1);
-    if (bits < 0) {
-      return false;
-    }
-    value =
-        vm::StackEntry{Ref<vm::CellSlice>{true, vm::CellBuilder().store_bits(td::ConstBitPtr{buff}, bits).finalize()}};
-    return true;
-  }
-  auto num = td::RefInt256{true};
-  auto& x = num.unique_write();
-  if (l >= 3 && str[0] == '0' && str[1] == 'x') {
-    if (x.parse_hex(str.data() + 2, l - 2) != l - 2) {
-      return false;
-    }
-  } else if (l >= 4 && str[0] == '-' && str[1] == '0' && str[2] == 'x') {
-    if (x.parse_hex(str.data() + 3, l - 3) != l - 3) {
-      return false;
-    }
-    x.negate().normalize();
-  } else if (!l || x.parse_dec(str.data(), l) != l) {
-    return false;
-  }
-  value = vm::StackEntry{std::move(num)};
-  return true;
-}
-
-bool TestNode::parse_stack_value(vm::StackEntry& value) {
-  return parse_stack_value(td::Slice{get_word()}, value) || set_error("invalid vm stack value");
 }
 
 bool TestNode::set_error(std::string err_msg) {
@@ -847,6 +828,11 @@ bool TestNode::show_help(std::string command) {
          "header\n"
          "byutime <workchain> <shard-prefix> <utime>\tLooks up a block by workchain, shard and creation time, and "
          "shows its header\n"
+         "creatorstats <block-id-ext> [<count> [<start-pubkey>]]\tLists block creator statistics by validator public "
+         "key\n"
+         "recentcreatorstats <block-id-ext> <start-utime> [<count> [<start-pubkey>]]\tLists block creator statistics "
+         "updated after <start-utime> by validator public "
+         "key\n"
          "known\tShows the list of all known block ids\n"
          "privkey <filename>\tLoads a private key from file\n"
          "help [<command>]\tThis help\n"
@@ -864,7 +850,7 @@ bool TestNode::do_parse_line() {
   ton::BlockSeqno seqno{};
   ton::UnixTime utime{};
   unsigned count{};
-  std::string word = get_word();
+  std::string word = get_word().str();
   skipspc();
   if (word == "time") {
     return eoln() && get_server_time();
@@ -934,6 +920,12 @@ bool TestNode::do_parse_line() {
     return parse_shard_id(shard) && parse_uint32(utime) && seekeoln() && lookup_block(shard, 4, utime);
   } else if (word == "bylt") {
     return parse_shard_id(shard) && parse_lt(lt) && seekeoln() && lookup_block(shard, 2, lt);
+  } else if (word == "creatorstats" || word == "recentcreatorstats") {
+    count = 1000;
+    int mode = (word == "recentcreatorstats" ? 4 : 0);
+    return parse_block_id_ext(blkid) && (!mode || parse_uint32(utime)) && (seekeoln() || parse_uint32(count)) &&
+           (seekeoln() || (parse_hash(hash) && (mode |= 1))) && seekeoln() &&
+           get_creator_stats(blkid, mode, count, hash, utime);
   } else if (word == "known") {
     return eoln() && show_new_blkids(true);
   } else if (word == "quit" && eoln()) {
@@ -1025,14 +1017,12 @@ bool TestNode::get_account_state(ton::WorkchainId workchain, ton::StdSmcAddress 
 
 bool TestNode::parse_run_method(ton::WorkchainId workchain, ton::StdSmcAddress addr, ton::BlockIdExt ref_blkid,
                                 std::string method_name) {
-  std::vector<vm::StackEntry> params;
-  while (!seekeoln()) {
-    vm::StackEntry param;
-    if (!parse_stack_value(param)) {
-      return false;
-    }
-    params.push_back(std::move(param));
+  auto R = vm::parse_stack_entries(td::Slice(parse_ptr_, parse_end_));
+  if (R.is_error()) {
+    return set_error(R.move_as_error().to_string());
   }
+  parse_ptr_ = parse_end_;
+  auto params = R.move_as_ok();
   if (!ref_blkid.is_valid()) {
     return set_error("must obtain last block information before making other queries");
   }
@@ -1153,16 +1143,24 @@ void TestNode::got_account_state(ton::BlockIdExt ref_blk, ton::BlockIdExt blk, t
       vm::load_cell_slice(info.root).print_rec(outp);
       out << outp.str();
       out << "last transaction lt = " << info.last_trans_lt << " hash = " << info.last_trans_hash.to_hex() << std::endl;
+      block::gen::Account::Record_account acc;
+      block::gen::AccountStorage::Record store;
+      block::CurrencyCollection balance;
+      if (tlb::unpack_cell(info.root, acc) && tlb::csr_unpack(acc.storage, store) && balance.unpack(store.balance)) {
+        out << "account balance is " << balance.to_str() << std::endl;
+      }
     } else {
       out << "account state is empty" << std::endl;
     }
   } else if (info.root.not_null()) {
     block::gen::Account::Record_account acc;
     block::gen::AccountStorage::Record store;
-    if (!(tlb::unpack_cell(info.root, acc) && tlb::csr_unpack(acc.storage, store))) {
+    block::CurrencyCollection balance;
+    if (!(tlb::unpack_cell(info.root, acc) && tlb::csr_unpack(acc.storage, store) && balance.unpack(store.balance))) {
       LOG(ERROR) << "error unpacking account state";
       return;
     }
+    out << "account balance is " << balance.to_str() << std::endl;
     int tag = block::gen::t_AccountState.get_tag(*store.state);
     switch (tag) {
       case block::gen::AccountState::account_uninit:
@@ -1240,7 +1238,9 @@ void TestNode::run_smc_method(ton::BlockIdExt ref_blk, ton::BlockIdExt blk, ton:
   }
   block::gen::Account::Record_account acc;
   block::gen::AccountStorage::Record store;
-  if (!(tlb::unpack_cell(info.root, acc) && tlb::csr_unpack(acc.storage, store))) {
+  block::CurrencyCollection balance;
+  if (!(tlb::unpack_cell(info.root, acc) && tlb::csr_unpack(acc.storage, store) &&
+        balance.validate_unpack(store.balance))) {
     LOG(ERROR) << "error unpacking account state";
     return;
   }
@@ -1267,7 +1267,7 @@ void TestNode::run_smc_method(ton::BlockIdExt ref_blk, ton::BlockIdExt blk, ton:
   {
     std::ostringstream os;
     os << "arguments: ";
-    stack->dump(os);
+    stack->dump(os, 3);
     out << os.str();
   }
   long long gas_limit = vm::GasLimits::infty;
@@ -1276,6 +1276,8 @@ void TestNode::run_smc_method(ton::BlockIdExt ref_blk, ton::BlockIdExt blk, ton:
   vm::GasLimits gas{gas_limit};
   LOG(DEBUG) << "creating VM";
   vm::VmState vm{code, std::move(stack), gas, 1, data, vm::VmLog()};
+  vm.set_c7(liteclient::prepare_vm_c7(info.gen_utime, info.gen_lt, acc.addr, balance));  // tuple with SmartContractInfo
+  // vm.incr_stack_trace(1);    // enable stack dump after each step
   LOG(INFO) << "starting VM to run method `" << method << "` (" << method_id << ") of smart contract " << workchain
             << ":" << addr.to_hex();
   int exit_code = ~vm.run();
@@ -1289,7 +1291,7 @@ void TestNode::run_smc_method(ton::BlockIdExt ref_blk, ton::BlockIdExt blk, ton:
   {
     std::ostringstream os;
     os << "result: ";
-    stack->dump(os);
+    stack->dump(os, 3);
     out << os.str();
   }
 }
@@ -1680,7 +1682,7 @@ bool TestNode::get_config_params(ton::BlockIdExt blkid, int mode, std::string fi
                                           true);
   LOG(INFO) << "requesting " << params.size() << " configuration parameters with respect to masterchain block "
             << blkid.to_str();
-  return envelope_send_query(std::move(b), [ Self = actor_id(this), mode, filename,
+  return envelope_send_query(std::move(b), [ Self = actor_id(this), mode, filename, blkid,
                                              params = std::move(params) ](td::Result<td::BufferSlice> R) mutable {
     if (R.is_error()) {
       return;
@@ -1690,18 +1692,23 @@ bool TestNode::get_config_params(ton::BlockIdExt blkid, int mode, std::string fi
       LOG(ERROR) << "cannot parse answer to liteServer.getConfigParams";
     } else {
       auto f = F.move_as_ok();
-      td::actor::send_closure_later(Self, &TestNode::got_config_params, ton::create_block_id(f->id_),
+      td::actor::send_closure_later(Self, &TestNode::got_config_params, blkid, ton::create_block_id(f->id_),
                                     std::move(f->state_proof_), std::move(f->config_proof_), mode, filename,
                                     std::move(params));
     }
   });
 }
 
-void TestNode::got_config_params(ton::BlockIdExt blkid, td::BufferSlice state_proof, td::BufferSlice cfg_proof,
-                                 int mode, std::string filename, std::vector<int> params) {
+void TestNode::got_config_params(ton::BlockIdExt req_blkid, ton::BlockIdExt blkid, td::BufferSlice state_proof,
+                                 td::BufferSlice cfg_proof, int mode, std::string filename, std::vector<int> params) {
   LOG(INFO) << "got configuration parameters";
   if (!blkid.is_masterchain_ext()) {
     LOG(ERROR) << "reference block " << blkid.to_str() << " for the configuration is not a valid masterchain block";
+    return;
+  }
+  if (blkid != req_blkid) {
+    LOG(ERROR) << "got configuration parameters with respect to block " << blkid.to_str() << " instead of "
+               << req_blkid.to_str();
     return;
   }
   auto R = block::check_extract_state_proof(blkid, state_proof.as_slice(), cfg_proof.as_slice());
@@ -2153,6 +2160,107 @@ void TestNode::got_block_proof(ton::BlockIdExt from, ton::BlockIdExt to, int mod
                           << now - chain->last_utime << " seconds ago)\n";
   }
   show_new_blkids();
+}
+
+bool TestNode::get_creator_stats(ton::BlockIdExt blkid, int mode, unsigned req_count, ton::Bits256 start_after,
+                                 ton::UnixTime min_utime) {
+  if (!(ready_ && !client_.empty())) {
+    return set_error("server connection not ready");
+  }
+  if (!blkid.is_masterchain_ext()) {
+    return set_error("only masterchain blocks contain block creator statistics");
+  }
+  if (!(mode & 1)) {
+    start_after.set_zero();
+  }
+  auto b = ton::serialize_tl_object(ton::create_tl_object<ton::lite_api::liteServer_getValidatorStats>(
+                                        mode, ton::create_tl_lite_block_id(blkid), req_count, start_after, min_utime),
+                                    true);
+  LOG(INFO) << "requesting up to " << req_count << " block creator stats records with respect to masterchain block "
+            << blkid.to_str() << " starting from validator public key " << start_after.to_hex() << " created after "
+            << min_utime << " (mode=" << mode << ")";
+  return envelope_send_query(std::move(b), [ Self = actor_id(this), mode, blkid, req_count, start_after,
+                                             min_utime ](td::Result<td::BufferSlice> R) {
+    if (R.is_error()) {
+      return;
+    }
+    auto F = ton::fetch_tl_object<ton::lite_api::liteServer_validatorStats>(R.move_as_ok(), true);
+    if (F.is_error()) {
+      LOG(ERROR) << "cannot parse answer to liteServer.getValidatorStats";
+    } else {
+      auto f = F.move_as_ok();
+      td::actor::send_closure_later(Self, &TestNode::got_creator_stats, blkid, ton::create_block_id(f->id_), mode,
+                                    f->mode_, start_after, min_utime, std::move(f->state_proof_),
+                                    std::move(f->data_proof_), f->count_, req_count, f->complete_);
+    }
+  });
+}
+
+void TestNode::got_creator_stats(ton::BlockIdExt req_blkid, ton::BlockIdExt blkid, int req_mode, int mode,
+                                 td::Bits256 start_after, ton::UnixTime min_utime, td::BufferSlice state_proof,
+                                 td::BufferSlice data_proof, int count, int req_count, bool complete) {
+  LOG(INFO) << "got answer to getValidatorStats query: " << count << " records out of " << req_count << ", "
+            << (complete ? "complete" : "incomplete");
+  if (!blkid.is_masterchain_ext()) {
+    LOG(ERROR) << "reference block " << blkid.to_str()
+               << " for block creator statistics is not a valid masterchain block";
+    return;
+  }
+  if (count > req_count) {
+    LOG(ERROR) << "obtained " << count << " answers to getValidatorStats query, but only " << req_count
+               << " were requested";
+    return;
+  }
+  if (blkid != req_blkid) {
+    LOG(ERROR) << "answer to getValidatorStats refers to masterchain block " << blkid.to_str()
+               << " different from requested " << req_blkid.to_str();
+    return;
+  }
+  auto R = block::check_extract_state_proof(blkid, state_proof.as_slice(), data_proof.as_slice());
+  if (R.is_error()) {
+    LOG(ERROR) << "masterchain state proof for " << blkid.to_str() << " is invalid : " << R.move_as_error().to_string();
+    return;
+  }
+  bool allow_eq = (mode & 3) != 1;
+  ton::Bits256 key{start_after};
+  std::ostringstream os;
+  try {
+    auto dict = block::get_block_create_stats_dict(R.move_as_ok());
+    if (!dict) {
+      LOG(ERROR) << "cannot extract BlockCreateStats from mc state";
+      return;
+    }
+    for (int i = 0; i < count + (int)complete; i++) {
+      auto v = dict->lookup_nearest_key(key, true, allow_eq);
+      if (v.is_null()) {
+        if (i != count) {
+          LOG(ERROR) << "could fetch only " << i << " CreatorStats entries out of " << count
+                     << " declared in answer to getValidatorStats";
+          return;
+        }
+        break;
+      }
+      block::DiscountedCounter mc_cnt, shard_cnt;
+      if (!block::unpack_CreatorStats(std::move(v), mc_cnt, shard_cnt)) {
+        LOG(ERROR) << "invalid CreatorStats record with key " << key.to_hex();
+        return;
+      }
+      if (mc_cnt.modified_since(min_utime) || shard_cnt.modified_since(min_utime)) {
+        os << key.to_hex() << " mc_cnt:" << mc_cnt << " shard_cnt:" << shard_cnt << std::endl;
+      }
+      allow_eq = false;
+    }
+    if (complete) {
+      os << "(complete)" << std::endl;
+    } else {
+      os << "(incomplete, repeat query from " << key.to_hex() << " )" << std::endl;
+    }
+    td::TerminalIO::out() << os.str();
+  } catch (vm::VmError& err) {
+    LOG(ERROR) << "error while traversing block creator stats: " << err.get_msg();
+  } catch (vm::VmVirtError& err) {
+    LOG(ERROR) << "virtualization error while traversing block creator stats: " << err.get_msg();
+  }
 }
 
 int main(int argc, char* argv[]) {

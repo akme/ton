@@ -3,9 +3,10 @@
 
 def? $1 { @' $1 } { "" } cond constant suffix 
 { suffix $+ } : +suffix
+256 1<<1- 15 / constant AllOnes
 
 wc_master setworkchain
--17 setglobalid   // negative value means a test instance of the blockchain
+-239 setglobalid   // negative value means a test instance of the blockchain
 
 // Initial state of Workchain 0 (Basic workchain)
 
@@ -54,10 +55,11 @@ Libs{
   x{ABACABADABACABA} s>c public_lib
   x{1234} x{5678} |_ s>c private_lib
 }Libs  // libraries
-GR$1700000000 // balance
+GR$4999990000 // balance
 0 // split_depth
 0 // ticktock
-2 // mode: create
+AllOnes 0 * // address
+6 // mode: create+setaddr
 register_smc
 dup make_special dup constant smc1_addr  
 Masterchain over 
@@ -82,8 +84,8 @@ Masterchain over
 // code
 <b 0 32 u, b> // data
 empty_cell    // libraries
-GR$1000000    // initial balance (1m test Grams)
-0 0 2 register_smc
+GR$1000       // initial balance (1k test Grams)
+0 0 AllOnes 6 * 6 register_smc
 dup make_special dup constant smc2_addr
 Masterchain over 
 2dup ."free test gram giver address = " .addr cr 2dup 6 .Addr cr
@@ -120,7 +122,7 @@ Libs{
   x{ABACABADABACABA} s>c public_lib
   x{1234} x{5678} |_ s>c public_lib
 }Libs  // libraries
-0x333333333 // balance
+GR$666 // balance
 0 // split_depth
 3 // ticktock: tick
 2 // mode: create
@@ -133,13 +135,14 @@ dup make_special dup constant smc3_addr
  * SmartContract #4 (elector)
  *
  */
-"elector-code.fif" include   // code in separate source file
+"auto/elector-code.fif" include   // code in separate source file
 <b 0 1 1+ 1+ 4 + 32 + u, 0 256 u, b>  // data: dict dict dict grams uint32 uint256
 empty_cell  // libraries
 GR$10  // balance: 10 grams
 0 // split_depth
 2 // ticktock: tick
-2 // mode: create
+AllOnes 3 * // address: -1:333...333
+6 // mode: create + setaddr
 register_smc
 dup make_special dup constant smc4_addr dup constant elector_addr
 Masterchain swap
@@ -155,14 +158,15 @@ Masterchain swap
 0 capCreateStats config.version!
 // max-validators max-main-validators min-validators
 // 9 4 1 config.validator_num!
-1000 100 5 config.validator_num!
+1000 100 13 config.validator_num!
 // min-stake max-stake min-total-stake max-factor
-GR$10000 GR$10000000 GR$1000000 sg~10 config.validator_stake_limits!
+GR$10000 GR$10000000 GR$500000 sg~10 config.validator_stake_limits!
 // elected-for elect-start-before elect-end-before stakes-frozen-for
 // 400000 200000 4000 400000 config.election_params!
-4000 2000 500 1000 config.election_params!  // DEBUG
+// 4000 2000 500 1000 config.election_params!  // DEBUG
+65536 32768 8192 32768 config.election_params!  // TestNet DEBUG
 // config-addr = -1:5555...5555
-256 1<<1- 3 / constant config_addr
+AllOnes 5 * constant config_addr
 config_addr config.config_smc!
 // elector-addr
 elector_addr config.elector_smc!
@@ -202,8 +206,7 @@ smc1_addr config.minter_smc!
 // 17 add-validator
 // newkeypair nip dup ."Validator #2 public key = " Bx. cr
 // 239 add-validator
-// 100000 =: orig_vset_valid_for
-100 =: orig_vset_valid_for  // original validator set valid 100 seconds only (DEBUG)
+100000 =: orig_vset_valid_for  // original validator set valid 100000 seconds
 now dup orig_vset_valid_for + 0 config.validators!
 
 /*
@@ -211,11 +214,12 @@ now dup orig_vset_valid_for + 0 config.validators!
  * SmartContract #5 (Configuration smart contract)
  *
  */
-"config-code.fif" include   // code in separate source file
-<b 0 32 u, 
+"auto/config-code.fif" include   // code in separate source file
+<b configdict ref,  // initial configuration
+   0 32 u,          // seqno
    "config-master" +suffix +".pk" load-generate-keypair drop
    B,
-   configdict ref,
+   dictnew dict,   // vote dict
 b> // data
 empty_cell  // libraries
 GR$10  // balance
@@ -225,6 +229,22 @@ Masterchain swap
 ."config smart contract address = " 2dup .addr cr 2dup 7 .Addr cr
 "config-master" +suffix +".addr" save-address-verbose
 // Other data
+
+/*
+ *
+ *  Initial wallets (test)
+ *
+ */
+ 
+// pubkey amount `create-wallet1` or pubkey amount `create-wallet2`
+PK'PuZPPXK5Rff9SvtoS7Y9lUuEixvy-J6aishYFj3Qn6P0pJMb GR$1000000000 create-wallet1
+PK'PuYiB1zAWzr4p8j6I681+sGUrRGcn6Ylf7vXl0xaUl/w6Xfg GR$1700000000 create-wallet0
+
+/*
+ *
+ *  Create state
+ *
+ */
 
 create_state
 cr cr ."new state is:" cr dup <s csr. cr

@@ -692,7 +692,7 @@ int VmState::step() {
   //VM_LOG(st) << "stack:";  stack->dump(VM_LOG(st));
   //VM_LOG(st) << "; cr0.refcnt = " << get_c0()->get_refcnt() - 1 << std::endl;
   if (stack_trace) {
-    stack->dump(std::cerr);
+    stack->dump(std::cerr, 3);
   }
   ++steps;
   if (code->size()) {
@@ -708,6 +708,9 @@ int VmState::step() {
 }
 
 int VmState::run() {
+  if (code.is_null()) {
+    throw VmError{Excno::fatal, "cannot run an uninitialized VM"};
+  }
   int res;
   Guard guard(this);
   do {
@@ -744,6 +747,9 @@ int VmState::run() {
     }
   } while (!res);
   // LOG(INFO) << "[EN] data cells: " << DataCell::get_total_data_cells();
+  if ((res | 1) == -1) {
+    commit();
+  }
   return res;
 }
 

@@ -378,7 +378,7 @@ bool ValidateQuery::init_parse() {
   block::gen::ExtBlkRef::Record mcref;  // _ ExtBlkRef = BlkMasterInfo;
   ShardIdFull shard;
   if (!(tlb::unpack_cell(block_root_, blk) && tlb::unpack_cell(blk.info, info) && !info.version &&
-        block::tlb::t_ShardIdent.unpack(info.shard.write(), shard) && !info.vert_seq_no &&
+        block::tlb::t_ShardIdent.unpack(info.shard.write(), shard) &&
         block::gen::BlkPrevInfo{info.after_merge}.validate_ref(info.prev_ref) &&
         (!info.not_master || tlb::unpack_cell(info.master_ref, mcref)) && tlb::unpack_cell(blk.extra, extra))) {
     return reject_query("cannot unpack block header");
@@ -393,6 +393,7 @@ bool ValidateQuery::init_parse() {
     return fatal_error("invalid Merkle update in block");
   }
   global_id_ = blk.global_id;
+  vert_seqno_ = info.vert_seq_no;
   prev_state_hash_ = upd_cs.prefetch_ref(0)->get_hash(0).bits();
   state_hash_ = upd_cs.prefetch_ref(1)->get_hash(0).bits();
   start_lt_ = info.start_lt;
@@ -427,6 +428,10 @@ bool ValidateQuery::init_parse() {
   }
   if (is_key_block_ && !shard.is_masterchain()) {
     return reject_query("a non-masterchain block cannot be a key block");
+  }
+  if (info.vert_seqno_incr) {
+    // what about non-masterchain blocks?
+    return reject_query("new blocks cannot have vert_seqno_incr set");
   }
   if (info.after_merge != after_merge_) {
     return reject_query("after_merge value mismatch in block header");
@@ -683,7 +688,13 @@ bool ValidateQuery::try_unpack_mc_state() {
       CHECK(!mc_seqno_ || new_shard_conf_->get_mc_hash().not_null());
     }
     if (global_id_ != config_->get_global_blockchain_id()) {
-      return reject_query("blockchain global id mismatch");
+      return reject_query(PSTRING() << "blockchain global id mismatch: new block has " << global_id_
+                                    << " while the masterchain configuration expects "
+                                    << config_->get_global_blockchain_id());
+    }
+    if (vert_seqno_ != config_->get_vert_seqno()) {
+      return reject_query(PSTRING() << "vertical seqno mismatch: new block has " << vert_seqno_
+                                    << " while the masterchain configuration expects " << config_->get_vert_seqno());
     }
     prev_key_block_exists_ = config_->get_last_key_block(prev_key_block_, prev_key_block_lt_);
     if (prev_key_block_exists_) {
@@ -1102,6 +1113,10 @@ bool ValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdExt blki
   if (res.is_error()) {
     return fatal_error(std::move(res));
   }
+  if (ss.vert_seqno_ > vert_seqno_) {
+    return reject_query(PSTRING() << "one of previous states " << ss.id_.to_str() << " has vertical seqno "
+                                  << ss.vert_seqno_ << " larger than that of the new block " << vert_seqno_);
+  }
   return true;
 }
 
@@ -1147,6 +1162,10 @@ bool ValidateQuery::unpack_next_state() {
   if (!is_masterchain() && ns_.mc_blk_ref_ != mc_blkid_) {
     return reject_query("new state refers to masterchain block "s + ns_.mc_blk_ref_.to_str() + " different from " +
                         mc_blkid_.to_str() + " indicated in block header");
+  }
+  if (ns_.vert_seqno_ != vert_seqno_) {
+    return reject_query(PSTRING() << "new state has vertical seqno " << ns_.vert_seqno_ << " different from "
+                                  << vert_seqno_ << " declared in the new block header");
   }
   // ...
   return true;
@@ -1602,12 +1621,13 @@ bool ValidateQuery::check_one_shard(const block::McShardHash& info, const block:
                                   << " has unchanged catchain seqno " << cc_seqno
                                   << ", but it must have been updated for all shards");
   }
-  if (!cc_updated && !info.before_merge_ && old_before_merge && !workchain_created) {
+  bool bm_cleared = !info.before_merge_ && old_before_merge;
+  if (!cc_updated && bm_cleared && !workchain_created) {
     return reject_query(PSTRING() << "new shard configuration for shard " << shard.to_str()
                                   << " has unchanged catchain seqno " << cc_seqno
                                   << " while the before_merge bit has been cleared");
   }
-  if (cc_updated && (!update_shard_cc_ || (!info.before_merge_ && old_before_merge))) {
+  if (cc_updated && !(update_shard_cc_ || bm_cleared)) {
     return reject_query(PSTRING() << "new shard configuration for shard " << shard.to_str()
                                   << " has increased catchain seqno " << cc_seqno << " without a good reason");
   }
@@ -5066,7 +5086,7 @@ bool ValidateQuery::check_mc_state_extra() {
   }
   // block_create_stats:(flags . 0)?BlockCreateStats
   if (new_extra.r1.flags & 1) {
-    block::gen::BlockCreateStats::Record rec;
+    block::gen::BlockCreateStats::Record_block_create_stats rec;
     if (!tlb::csr_unpack(new_extra.r1.block_create_stats, rec)) {
       return reject_query("cannot unpack BlockCreateStats in the new masterchain state");
     }

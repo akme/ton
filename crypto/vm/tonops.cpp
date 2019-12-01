@@ -75,10 +75,17 @@ int exec_set_gas_limit(VmState* st) {
   return exec_set_gas_generic(st, gas);
 }
 
+int exec_commit(VmState* st) {
+  VM_LOG(st) << "execute COMMIT";
+  st->commit();
+  return 0;
+}
+
 void register_basic_gas_ops(OpcodeTable& cp0) {
   using namespace std::placeholders;
   cp0.insert(OpcodeInstr::mksimple(0xf800, 16, "ACCEPT", exec_accept))
-      .insert(OpcodeInstr::mksimple(0xf801, 16, "SETGASLIMIT", exec_set_gas_limit));
+      .insert(OpcodeInstr::mksimple(0xf801, 16, "SETGASLIMIT", exec_set_gas_limit))
+      .insert(OpcodeInstr::mksimple(0xf80f, 16, "COMMIT", exec_commit));
 }
 
 void register_ton_gas_ops(OpcodeTable& cp0) {
@@ -268,7 +275,7 @@ int exec_ed25519_check_signature(VmState* st, bool from_slice) {
   }
   td::Ed25519::PublicKey pub_key{td::SecureString(td::Slice{key, 32})};
   auto res = pub_key.verify_signature(td::Slice{data, data_len}, td::Slice{signature, 64});
-  stack.push_bool(res.is_ok());
+  stack.push_bool(res.is_ok() || st->get_chksig_always_succeed());
   return 0;
 }
 
@@ -655,12 +662,49 @@ int exec_set_code(VmState* st) {
   return install_output_action(st, cb.finalize());
 }
 
+int exec_set_lib_code(VmState* st) {
+  VM_LOG(st) << "execute SETLIBCODE";
+  Stack& stack = st->get_stack();
+  stack.check_underflow(2);
+  int mode = stack.pop_smallint_range(2);
+  auto code = stack.pop_cell();
+  CellBuilder cb;
+  if (!(cb.store_ref_bool(get_actions(st))         // out_list$_ {n:#} prev:^(OutList n)
+        && cb.store_long_bool(0x26fa1dd4, 32)      // action_change_library#26fa1dd4
+        && cb.store_long_bool(mode * 2 + 1, 8)     // mode:(## 7) { mode <= 2 }
+        && cb.store_ref_bool(std::move(code)))) {  // libref:LibRef = OutAction;
+    throw VmError{Excno::cell_ov, "cannot serialize new library code into an output action cell"};
+  }
+  return install_output_action(st, cb.finalize());
+}
+  
+int exec_change_lib(VmState* st) {
+  VM_LOG(st) << "execute CHANGELIB";
+  Stack& stack = st->get_stack();
+  stack.check_underflow(2);
+  int mode = stack.pop_smallint_range(2);
+  auto hash = stack.pop_int_finite();
+  if (!hash->unsigned_fits_bits(256)) {
+    throw VmError{Excno::range_chk, "library hash must be non-negative"};
+  }
+  CellBuilder cb;
+  if (!(cb.store_ref_bool(get_actions(st))         // out_list$_ {n:#} prev:^(OutList n)
+        && cb.store_long_bool(0x26fa1dd4, 32)      // action_change_library#26fa1dd4
+        && cb.store_long_bool(mode * 2, 8)         // mode:(## 7) { mode <= 2 }
+        && cb.store_int256_bool(hash, 256, false))) {  // libref:LibRef = OutAction;
+    throw VmError{Excno::cell_ov, "cannot serialize library hash into an output action cell"};
+  }
+  return install_output_action(st, cb.finalize());
+}
+
 void register_ton_message_ops(OpcodeTable& cp0) {
   using namespace std::placeholders;
   cp0.insert(OpcodeInstr::mksimple(0xfb00, 16, "SENDRAWMSG", exec_send_raw_message))
       .insert(OpcodeInstr::mksimple(0xfb02, 16, "RESERVERAW", std::bind(exec_reserve_raw, _1, 0)))
       .insert(OpcodeInstr::mksimple(0xfb03, 16, "RESERVERAWX", std::bind(exec_reserve_raw, _1, 1)))
-      .insert(OpcodeInstr::mksimple(0xfb04, 16, "SETCODE", exec_set_code));
+      .insert(OpcodeInstr::mksimple(0xfb04, 16, "SETCODE", exec_set_code))
+      .insert(OpcodeInstr::mksimple(0xfb06, 16, "SETLIBCODE", exec_set_lib_code))
+      .insert(OpcodeInstr::mksimple(0xfb07, 16, "CHANGELIB", exec_change_lib));
 }
 
 void register_ton_ops(OpcodeTable& cp0) {

@@ -93,6 +93,9 @@ class TestNode : public td::actor::Actor {
   };
 
   void run_init_queries();
+  char cur() const {
+    return *parse_ptr_;
+  }
   bool get_server_time();
   bool get_server_version(int mode = 0);
   void got_server_version(td::Result<td::BufferSlice> res, int mode);
@@ -122,8 +125,8 @@ class TestNode : public td::actor::Actor {
   bool get_all_shards(bool use_last = true, ton::BlockIdExt blkid = {});
   void got_all_shards(ton::BlockIdExt blk, td::BufferSlice proof, td::BufferSlice data);
   bool get_config_params(ton::BlockIdExt blkid, int mode = 0, std::string filename = "");
-  void got_config_params(ton::BlockIdExt blkid, td::BufferSlice state_proof, td::BufferSlice cfg_proof, int mode,
-                         std::string filename, std::vector<int> params);
+  void got_config_params(ton::BlockIdExt req_blkid, ton::BlockIdExt blkid, td::BufferSlice state_proof,
+                         td::BufferSlice cfg_proof, int mode, std::string filename, std::vector<int> params);
   bool get_block(ton::BlockIdExt blk, bool dump = false);
   void got_block(ton::BlockIdExt blkid, td::BufferSlice data, bool dump);
   bool get_state(ton::BlockIdExt blk, bool dump = false);
@@ -150,10 +153,18 @@ class TestNode : public td::actor::Actor {
                               std::vector<TransId> trans, td::BufferSlice proof);
   bool get_block_proof(ton::BlockIdExt from, ton::BlockIdExt to, int mode);
   void got_block_proof(ton::BlockIdExt from, ton::BlockIdExt to, int mode, td::BufferSlice res);
+  bool get_creator_stats(ton::BlockIdExt blkid, int mode, unsigned req_count, ton::Bits256 start_after,
+                         ton::UnixTime min_utime);
+  void got_creator_stats(ton::BlockIdExt req_blkid, ton::BlockIdExt blkid, int req_mode, int mode,
+                         td::Bits256 start_after, ton::UnixTime min_utime, td::BufferSlice state_proof,
+                         td::BufferSlice data_proof, int count, int req_count, bool complete);
+  // parser
   bool do_parse_line();
   bool show_help(std::string command);
-  std::string get_word(char delim = ' ');
+  td::Slice get_word(char delim = ' ');
+  td::Slice get_word_ext(const char* delims, const char* specials = nullptr);
   bool get_word_to(std::string& str, char delim = ' ');
+  bool get_word_to(td::Slice& str, char delim = ' ');
   int skipspc();
   std::string get_line_tail(bool remove_spaces = true) const;
   bool eoln() const;
@@ -164,11 +175,12 @@ class TestNode : public td::actor::Actor {
   bool parse_account_addr(ton::WorkchainId& wc, ton::StdSmcAddress& addr);
   static int parse_hex_digit(int c);
   static bool parse_hash(const char* str, ton::Bits256& hash);
-  static bool convert_uint64(std::string word, td::uint64& val);
-  static bool convert_int64(std::string word, td::int64& val);
-  static bool convert_uint32(std::string word, td::uint32& val);
-  static bool convert_int32(std::string word, td::int32& val);
-  static bool convert_shard_id(std::string str, ton::ShardIdFull& shard);
+  static bool parse_hash(td::Slice str, ton::Bits256& hash);
+  static bool convert_uint64(td::Slice word, td::uint64& val);
+  static bool convert_int64(td::Slice word, td::int64& val);
+  static bool convert_uint32(td::Slice word, td::uint32& val);
+  static bool convert_int32(td::Slice word, td::int32& val);
+  static bool convert_shard_id(td::Slice str, ton::ShardIdFull& shard);
   bool parse_hash(ton::Bits256& hash);
   bool parse_lt(ton::LogicalTime& lt);
   bool parse_uint32(td::uint32& val);
@@ -177,6 +189,7 @@ class TestNode : public td::actor::Actor {
   bool parse_block_id_ext(std::string blk_id_string, ton::BlockIdExt& blkid, bool allow_incomplete = false) const;
   bool parse_stack_value(td::Slice str, vm::StackEntry& value);
   bool parse_stack_value(vm::StackEntry& value);
+  bool parse_stack_values(std::vector<vm::StackEntry>& values);
   bool register_blkid(const ton::BlockIdExt& blkid);
   bool show_new_blkids(bool all = false);
   bool complete_blkid(ton::BlockId partial_blkid, ton::BlockIdExt& complete_blkid) const;

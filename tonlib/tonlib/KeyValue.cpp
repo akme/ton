@@ -2,6 +2,7 @@
 
 #include "td/utils/filesystem.h"
 #include "td/utils/port/path.h"
+#include "td/utils/PathView.h"
 
 #include <map>
 #include <utility>
@@ -51,7 +52,7 @@ class KeyValueDir : public KeyValue {
           return td::WalkPath::Action::SkipDir;
         }
       } else if (type == td::WalkPath::Type::NotDir) {
-        f(path);
+        f(td::PathView::relative(path, directory_));
       }
 
       return td::WalkPath::Action::Continue;
@@ -105,11 +106,7 @@ class KeyValueInmemory : public KeyValue {
   }
 
  private:
-  class Cmp : public std::less<> {
-   public:
-    using is_transparent = void;
-  };
-  std::map<std::string, td::SecureString, Cmp> map_;
+  std::map<std::string, td::SecureString, std::less<>> map_;
 };
 }  // namespace detail
 
