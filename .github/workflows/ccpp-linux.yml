@@ -25,3 +25,12 @@ jobs:
       run: |
         cd build
         make -j4
+    - name: find & copy binaries
+      run: |
+        mkdir artifacts
+        for x in `find build -type f -perm -u+x`; do cp -av $x artifacts/;done
+    - name: Upload artifacts
+      uses: actions/upload-artifact@master
+      with:
+        name: ton-binaries
+        path: artifacts
