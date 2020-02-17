@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
 
@@ -137,6 +137,7 @@ class CellSlice : public td::CntObject {
   }
   unsigned get_cell_level() const;
   unsigned get_level() const;
+  Ref<Cell> get_base_cell() const;  // be careful with this one!
   int fetch_octet();
   int prefetch_octet() const;
   unsigned long long prefetch_ulong_top(unsigned& bits) const;
@@ -274,6 +275,7 @@ class CellSlice : public td::CntObject {
     offs = std::min(offs, size());
     return CellSlice{*this, size() - offs, size_refs(), offs, 0};
   }
+  CellSlice clone() const;
 
  private:
   void init_bits_refs();

@@ -18,6 +18,7 @@
 */
 #pragma once
 #include <iostream>
+#include <map>
 #include "vm/cellslice.h"
 
 namespace tlb {
@@ -196,6 +197,7 @@ class TLB {
   virtual std::ostream& print_type(std::ostream& os) const {
     return os << "<unknown-TLB-type>";
   }
+  std::string get_type_name() const;
   virtual bool print_skip(PrettyPrinter& pp, vm::CellSlice& cs) const;
   virtual bool print(PrettyPrinter& pp, const vm::CellSlice& cs) const {
     vm::CellSlice cs_copy{cs};
@@ -218,6 +220,9 @@ class TLB {
     return cs_ref.not_null() ? as_string(*cs_ref, indent) : "<null>";
   }
   std::string as_string_ref(Ref<vm::Cell> cell_ref, int indent = 0) const;
+  static inline size_t nat_abs(int x) {
+    return (x > 1) * 2 + (x & 1);
+  }
 
  protected:
   bool validate_ref_internal(Ref<vm::Cell> cell_ref, bool weak = false) const;
@@ -261,6 +266,30 @@ struct TLB_Complex : TLB {
   td::RefInt256 as_integer(Ref<vm::CellSlice> cs) const override {
     auto res = as_integer_skip(cs.write());
     return res.not_null() && cs->empty_ext() ? std::move(res) : td::RefInt256{};
+  }
+};
+
+class TlbTypeHolder : public td::CntObject {
+  const TLB* type{nullptr};
+  char* data{nullptr};
+
+ public:
+  TlbTypeHolder() = default;
+  TlbTypeHolder(const TLB* _type) : type(_type), data(nullptr) {
+  }
+  TlbTypeHolder(const TLB* _type, char* _data) : type(_type), data(_data) {
+  }
+  ~TlbTypeHolder() override {
+    free(data);
+  }
+  const TLB* get() const {
+    return type;
+  }
+  const TLB& operator*() const {
+    return *type;
+  }
+  const TLB* operator->() const {
+    return type;
   }
 };
 
@@ -498,6 +527,25 @@ struct PrettyPrinter {
     os << value;
     return *this;
   }
+};
+
+}  // namespace tlb
+
+namespace tlb {
+
+class TypenameLookup {
+  std::map<std::string, const TLB*> types;
+
+ public:
+  typedef std::function<bool(const char*, const TLB*)> simple_register_func_t;
+  typedef std::function<bool(simple_register_func_t)> register_func_t;
+  TypenameLookup() = default;
+  TypenameLookup(register_func_t func) {
+    register_types(func);
+  }
+  bool register_type(const char* name, const TLB* tp);
+  bool register_types(register_func_t func);
+  const TLB* lookup(std::string str) const;
 };
 
 }  // namespace tlb

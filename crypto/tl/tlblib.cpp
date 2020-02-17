@@ -33,6 +33,12 @@ const NatWidth t_Nat{32};
 const Anything t_Anything;
 const RefAnything t_RefCell;
 
+std::string TLB::get_type_name() const {
+  std::ostringstream os;
+  print_type(os);
+  return os.str();
+}
+
 bool Bool::print_skip(PrettyPrinter& pp, vm::CellSlice& cs) const {
   int t = get_tag(cs);
   return cs.advance(1) && pp.out(t ? "bool_true" : "bool_false");
@@ -337,6 +343,27 @@ bool PrettyPrinter::fetch_uint256_field(vm::CellSlice& cs, int n) {
 bool PrettyPrinter::fetch_uint256_field(vm::CellSlice& cs, int n, std::string name) {
   os << ' ' << name << ':';
   return out_integer(cs.fetch_int256(n, false));
+}
+
+}  // namespace tlb
+
+namespace tlb {
+
+bool TypenameLookup::register_types(typename TypenameLookup::register_func_t func) {
+  return func([this](const char* name, const TLB* tp) { return register_type(name, tp); });
+}
+
+bool TypenameLookup::register_type(const char* name, const TLB* tp) {
+  if (!name || !tp) {
+    return false;
+  }
+  auto res = types.emplace(name, tp);
+  return res.second;
+}
+
+const TLB* TypenameLookup::lookup(std::string str) const {
+  auto it = types.find(str);
+  return it != types.end() ? it->second : nullptr;
 }
 
 }  // namespace tlb

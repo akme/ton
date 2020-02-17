@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/cells/CellBuilder.h"
 
@@ -55,8 +55,16 @@ Ref<DataCell> CellBuilder::finalize_copy(bool special) const {
     LOG(ERROR) << res.error();
     throw CellWriteError{};
   }
-  CHECK(res.ok().not_null());
-  return res.move_as_ok();
+  auto cell = res.move_as_ok();
+  CHECK(cell.not_null());
+  if (vm_state_interface) {
+    vm_state_interface->register_new_cell(cell);
+    if (cell.is_null()) {
+      LOG(ERROR) << "cannot register new data cell";
+      throw CellWriteError{};
+    }
+  }
+  return cell;
 }
 
 Ref<DataCell> CellBuilder::finalize_novm(bool special) {
@@ -72,10 +80,17 @@ Ref<DataCell> CellBuilder::finalize_novm(bool special) {
 
 Ref<DataCell> CellBuilder::finalize(bool special) {
   auto* vm_state_interface = VmStateInterface::get();
-  if (vm_state_interface) {
-    vm_state_interface->register_cell_create();
+  if (!vm_state_interface) {
+    return finalize_novm(special);
   }
-  return finalize_novm(special);
+  vm_state_interface->register_cell_create();
+  auto cell = finalize_novm(special);
+  vm_state_interface->register_new_cell(cell);
+  if (cell.is_null()) {
+    LOG(ERROR) << "cannot register new data cell";
+    throw CellWriteError{};
+  }
+  return cell;
 }
 
 Ref<Cell> CellBuilder::create_pruned_branch(Ref<Cell> cell, td::uint32 new_level, td::uint32 virt_level) {
@@ -460,6 +475,16 @@ bool CellBuilder::append_cellslice_chk(Ref<CellSlice> cs_ref, unsigned size_ext)
   return cs_ref.not_null() && append_cellslice_chk(*cs_ref, size_ext);
 }
 
+CellSlice CellSlice::clone() const {
+  CellBuilder cb;
+  Ref<Cell> cell;
+  if (cb.append_cellslice_bool(*this) && cb.finalize_to(cell)) {
+    return CellSlice{NoVmOrd(), std::move(cell)};
+  } else {
+    return {};
+  }
+}
+
 bool CellBuilder::append_bitstring(const td::BitString& bs) {
   return store_bits_bool(bs.cbits(), bs.size());
 }
@@ -536,11 +561,11 @@ CellBuilder* CellBuilder::make_copy() const {
   return c;
 }
 
-CellSlice CellBuilder::as_cellslice() const& {
+CellSlice CellBuilder::as_cellslice() const & {
   return CellSlice{finalize_copy()};
 }
 
-Ref<CellSlice> CellBuilder::as_cellslice_ref() const& {
+Ref<CellSlice> CellBuilder::as_cellslice_ref() const & {
   return Ref<CellSlice>{true, finalize_copy()};
 }
 

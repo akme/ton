@@ -1295,15 +1295,18 @@ We list the instructions in lexicographical opcode order. However, the opcode sp
 We use hexadecimal notation (cf. ~\ptref{p:bitstring.hex}) for bitstrings. Stack registers {\tt s$(i)$} usually have $0\leq i\leq 15$, and $i$ is encoded in a 4-bit field (or, on a few rare occasions, in an 8-bit field). Other immediate parameters are usually 4-bit, 8-bit, or variable length.
 
 The stack notation described in~\ptref{sp:stack.notat} is extensively used throughout this appendix.
+
 \mysubsection{Gas prices}
 \def\gas#1{{\em ($#1$)}}
  The gas price for most primitives equals the {\em basic gas price}, computed as $P_b:=10+b+5r$, where $b$ is the instruction length in bits and $r$ is the number of cell references included in the instruction. When the gas price of an instruction differs from this basic price, it is indicated in parentheses after its mnemonics, either as \gas{x}, meaning that the total gas price equals $x$, or as \gas{+x}, meaning $P_b+x$. Apart from integer constants, the following expressions may appear:
 \begin{itemize}
-\item $C_r$ --- The total price of ``reading'' cells (i.e., transforming cell references into cell slices). Currently equal to 20 gas units per cell.
+\item $C_r$ --- The total price of ``reading'' cells (i.e., transforming cell references into cell slices). Currently equal to 100 or 25 gas units per cell depending on whether it is the first time a cell with this hash is being ``read'' during the current run of the VM or not.
 \item $L$ --- The total price of loading cells. Depends on the loading action required.
-\item $B_w$ --- The total price of creating new {\em Builder}s. Currently equal to 100 gas units per builder.
-\item $C_w$ --- The total price of creating new {\em Cell}s from {\em Builder}s). Currently equal to 100 gas units per cell.
+\item $B_w$ --- The total price of creating new {\em Builder\/}s. Currently equal to 0 gas units per builder.
+\item $C_w$ --- The total price of creating new {\em Cell\/}s from {\em Builder\/}s. Currently equal to 500 gas units per cell.
 \end{itemize}
+By default, the gas price of an instruction equals $P:=P_b+C_r+L+B_w+C_w$.
+
 \mysubsection{Stack manipulation primitives}
 
 This section includes both the basic (cf.~\ptref{sp:stack.basic}) and the compound (cf.~\ptref{sp:stack.comp}) stack manipulation primitives, as well as some ``unsystematic'' ones. Some compound stack manipulation primitives, such as {\tt XCPU} or {\tt XCHG2}, turn out to have the same length as an equivalent sequence of simpler operations. We have included these primitives regardless, so that they can easily be allocated shorter opcodes in a future revision of TVM---or removed for good.
@@ -1374,7 +1377,8 @@ Parameters $i$, $j$, and $k$ of the following primitives all are 4-bit integers 
 \item {\tt 69} --- {\tt CHKDEPTH}, pops integer $i$ from the stack, then checks whether there are at least $i$ elements, generating a stack underflow exception otherwise.
 \item {\tt 6A} --- {\tt ONLYTOPX}, pops integer $i$ from the stack, then removes all but the top $i$ elements.
 \item {\tt 6B} --- {\tt ONLYX}, pops integer $i$ from the stack, then leaves only the bottom $i$ elements. Approximately equivalent to {\tt DEPTH}; {\tt SWAP}; {\tt SUB}; {\tt DROPX}.
-\item {\tt 6C} --- reserved for stack operations.
+\item {\tt 6C00}--{\tt 6C0F} --- reserved for stack operations.
+\item {\tt 6C$ij$} --- {\tt BLKDROP2 $i$,$j$}, drops $i$ stack elements under the top $j$ elements, where $1\leq i\leq15$ and $0\leq j\leq 15$. Equivalent to {\tt REVERSE $i+j$,0}; {\tt BLKDROP $i$}; {\tt REVERSE $j$,0}.
 \end{itemize}
 
 \mysubsection{Tuple, List, and Null primitives}
@@ -1434,6 +1438,10 @@ The following primitives work with (the only) value~$\bot$ of type {\em Null}, u
 \item {\tt 6FA1} --- {\tt NULLSWAPIFNOT} ($x$ -- $x$ or $\bot$ $x$), pushes a {\em Null\/} under the topmost {\em Integer\/}~$x$, but only if $x=0$. May be used for stack alignment after quiet primitives such as {\tt PLDUXQ}.
 \item {\tt 6FA2} --- {\tt NULLROTRIF} ($x$ $y$ -- $x$ $y$ or $\bot$ $x$ $y$), pushes a {\em Null\/} under the second stack entry from the top, but only if the topmost {\em Integer\/} $y$ is non-zero.
 \item {\tt 6FA3} --- {\tt NULLROTRIFNOT} ($x$ $y$ -- $x$ $y$ or $\bot$ $x$ $y$), pushes a {\em Null\/} under the second stack entry from the top, but only if the topmost {\em Integer\/} $y$ is zero. May be used for stack alignment after quiet primitives such as {\tt LDUXQ}.
+\item {\tt 6FA4} --- {\tt NULLSWAPIF2} ($x$ -- $x$ or $\bot$ $\bot$ $x$), pushes two {\em Null\/}s under the topmost {\em Integer\/}~$x$, but only if $x\neq0$. Equivalent to {\tt NULLSWAPIF}; {\tt NULLSWAPIF}.
+\item {\tt 6FA5} --- {\tt NULLSWAPIFNOT2} ($x$ -- $x$ or $\bot$ $\bot$ $x$), pushes two {\em Null\/}s under the topmost {\em Integer\/}~$x$, but only if $x=0$. Equivalent to {\tt NULLSWAPIFNOT}; {\tt NULLSWAPIFNOT}.
+\item {\tt 6FA6} --- {\tt NULLROTRIF2} ($x$ $y$ -- $x$ $y$ or $\bot$ $\bot$ $x$ $y$), pushes two {\em Null\/}s under the second stack entry from the top, but only if the topmost {\em Integer\/} $y$ is non-zero. Equivalent to {\tt NULLROTRIF}; {\tt NULLROTRIF}.
+\item {\tt 6FA7} --- {\tt NULLROTRIFNOT2} ($x$ $y$ -- $x$ $y$ or $\bot$ $\bot$ $x$ $y$), pushes two {\em Null\/}s under the second stack entry from the top, but only if the topmost {\em Integer\/} $y$ is zero. Equivalent to {\tt NULLROTRIFNOT}; {\tt NULLROTRIFNOT}.
 \item {\tt 6FB$ij$} --- {\tt INDEX2 $i$,$j$} ($t$ -- $x$), recovers $x=(t_{i+1})_{j+1}$ for $0\leq i,j\leq 3$. Equivalent to {\tt INDEX $i$}; {\tt INDEX $j$}.
 \item {\tt 6FB4} --- {\tt CADR} ($t$ -- $x$), recovers $x=(t_2)_1$.
 \item {\tt 6FB5} --- {\tt CDDR} ($t$ -- $x$), recovers $x=(t_2)_2$.
@@ -1505,7 +1513,7 @@ The general encoding of a {\tt DIV}, {\tt DIVMOD}, or {\tt MOD} operation is {\t
 \begin{itemize}
 \item $0\leq m\leq1$ --- Indicates whether there is pre-multiplication ({\tt MULDIV} operation and its variants), possibly replaced by a left shift.
 \item $0\leq s\leq2$ --- Indicates whether either the multiplication or the division have been replaced by shifts: $s=0$---no replacement, $s=1$---division replaced by a right shift, $s=2$---multiplication replaced by a left shift (possible only for $m=1$).
-\item $0\leq c\leq1$ --- Indicates whether there is a constant one-byte argument $tt$ for the shift operator (if $s\neq0$). For $s=0$, $c=0$. If $c=1$, then $0\leq tt\leq 255$, and the shift is performed by $tt+1$ bits.
+\item $0\leq c\leq1$ --- Indicates whether there is a constant one-byte argument $tt$ for the shift operator (if $s\neq0$). For $s=0$, $c=0$. If $c=1$, then $0\leq tt\leq 255$, and the shift is performed by $tt+1$ bits. If $s\neq0$ and $c=0$, then the shift amount is provided to the instruction as a top-of-stack {\em Integer\/} in range $0\ldots256$.
 \item $1\leq d\leq3$ --- Indicates which results of division are required: $1$---only the quotient, $2$---only the remainder, $3$---both.
 \item $0\leq f\leq2$ --- Rounding mode: $0$---floor, $1$---nearest integer, $2$---ceiling (cf.~\ptref{sp:div.round}).
 \end{itemize}
@@ -1524,6 +1532,14 @@ Examples:
 \item {\tt A938$tt$} --- {\tt MODPOW2 $tt+1$}: ($x$ -- $x\bmod 2^{tt+1}$).
 \item {\tt A985} --- {\tt MULDIVR} ($x$ $y$ $z$ -- $q'$), where $q'=\lfloor xy/z+1/2\rfloor$.
 \item {\tt A98C} --- {\tt MULDIVMOD} ($x$ $y$ $z$ -- $q$ $r$), where $q:=\lfloor x\cdot y/z\rfloor$, $r:=x\cdot y\bmod z$ (same as {\tt */MOD} in Forth).
+\item {\tt A9A4} --- {\tt MULRSHIFT} ($x$ $y$ $z$ -- $\lfloor xy\cdot2^{-z}\rfloor$) for $0\leq z\leq 256$.
+\item {\tt A9A5} --- {\tt MULRSHIFTR} ($x$ $y$ $z$ -- $\lfloor xy\cdot2^{-z}+1/2\rfloor$) for $0\leq z\leq 256$.
+\item {\tt A9B4$tt$} --- {\tt MULRSHIFT $tt+1$} ($x$ $y$ -- $\lfloor xy\cdot 2^{-tt-1}\rfloor$).
+\item {\tt A9B5$tt$} --- {\tt MULRSHIFTR $tt+1$} ($x$ $y$ -- $\lfloor xy\cdot 2^{-tt-1}+1/2\rfloor$).
+\item {\tt A9C4} --- {\tt LSHIFTDIV} ($x$ $y$ $z$ -- $\lfloor 2^zx/y\rfloor$) for $0\leq z\leq 256$.
+\item {\tt A9C5} --- {\tt LSHIFTDIVR} ($x$ $y$ $z$ -- $\lfloor 2^zx/y+1/2\rfloor$) for $0\leq z\leq 256$.
+\item {\tt A9D4$tt$} --- {\tt LSHIFTDIV $tt+1$} ($x$ $y$ -- $\lfloor 2^{tt+1}x/y\rfloor$).
+\item {\tt A9D5$tt$} --- {\tt LSHIFTDIVR $tt+1$} ($x$ $y$ -- $\lfloor 2^{tt+1}x/y+1/2\rfloor$).
 \end{itemize}
 
 The most useful of these operations are {\tt DIV}, {\tt DIVMOD}, {\tt MOD}, {\tt DIVR}, {\tt DIVC}, {\tt MODPOW2 $t$}, and {\tt RSHIFTR $t$} (for integer arithmetic); and {\tt MULDIVMOD}, {\tt MULDIV}, {\tt MULDIVR}, {\tt LSHIFTDIVR $t$}, and {\tt MULRSHIFTR $t$} (for fixed-point arithmetic).
@@ -2132,6 +2148,10 @@ These primitives are completely similar to their non-prefix code counterparts {\
 \item {\tt F4AA} --- {\tt PFXDICTGETJMP} ($s$ $D$ $n$ -- $s'$ $s''$ or $s$), similar to {\tt PFXDICTGETQ}, but on success {\tt BLESS}es the value $x$ into a {\em Continuation\/} and transfers control to it as if by a {\tt JMPX}. On failure, returns $s$ unchanged and continues execution.
 \item {\tt F4AB} --- {\tt PFXDICTGETEXEC} ($s$ $D$ $n$ -- $s'$ $s''$), similar to {\tt PFXDICTGETJMP}, but {\tt EXEC}utes the continuation found instead of jumping to it. On failure, throws a cell deserialization exception.
 \item {\tt F4AE\_$n$} --- {\tt PFXDICTCONSTGETJMP $n$} or {\tt PFXDICTSWITCH $n$} ($s$ -- $s'$ $s''$ or $s$), combines {\tt DICTPUSHCONST $n$} for $0\leq n\leq 1023$ with {\tt PFXDICTGETJMP}.
+\item {\tt F4BC} --- {\tt DICTIGETJMPZ} ($i$ $D$ $n$ -- $i$ or nothing), a variant of {\tt DICTIGETJMP} that returns index $i$ on failure.
+\item {\tt F4BD} --- {\tt DICTUGETJMPZ} ($i$ $D$ $n$ -- $i$ or nothing), a variant of {\tt DICTUGETJMP} that returns index $i$ on failure.
+\item {\tt F4BE} --- {\tt DICTIGETEXECZ} ($i$ $D$ $n$ -- $i$ or nothing), a variant of {\tt DICTIGETEXEC} that returns index $i$ on failure.
+\item {\tt F4BF} --- {\tt DICTUGETEXECZ} ($i$ $D$ $n$ -- $i$ or nothing), a variant of {\tt DICTUGETEXEC} that returns index $i$ on failure.
 \end{itemize}
 
 \nxsubpoint\label{sp:prim.dict.get}\emb{{\sc SubDict} dictionary operations}
@@ -2142,6 +2162,7 @@ These primitives are completely similar to their non-prefix code counterparts {\
 \item {\tt F4B5} --- {\tt SUBDICTRPGET} ($k$ $l$ $D$ $n$ -- $D'$), similar to {\tt SUBDICTGET}, but removes the common prefix $k$ from all keys of the new dictionary $D'$, which becomes of type $\HashmapE(n-l,X)$.
 \item {\tt F4B6} --- {\tt SUBDICTIRPGET} ($x$ $l$ $D$ $n$ -- $D'$), variant of {\tt SUBDICTRPGET} with the prefix represented by a signed big-endian $l$-bit {\em Integer\/}~$x$, where necessarily $l\leq257$.
 \item {\tt F4B7} --- {\tt SUBDICTURPGET} ($x$ $l$ $D$ $n$ -- $D'$), variant of {\tt SUBDICTRPGET} with the prefix represented by an unsigned big-endian $l$-bit {\em Integer\/}~$x$, where necessarily $l\leq256$.
+\item {\tt F4BC}--{\tt F4BF} --- used by {\tt DICT\dots Z} primitives in \ptref{sp:prim.dict.get.spec}.
 \end{itemize}
 
 \mysubsection{Application-specific primitives}\label{p:prim.app}
@@ -2165,8 +2186,12 @@ Of the following primitives, only the first two are ``pure'' in the sense that t
 \end{itemize}
 
 \nxsubpoint\emb{Pseudo-random number generator primitives}
-The pseudo-random number generator uses the random seed and (sometimes) other data kept in {\tt c7}.
+The pseudo-random number generator uses the random seed (parameter \#6, cf.~\ptref{sp:prim.conf.param}), an unsigned 256-bit {\em Integer}, and (sometimes) other data kept in {\tt c7}. The initial value of the random seed before a smart contract is executed in TON Blockchain is a hash of the smart contract address and the global block random seed. If there are several runs of the same smart contract inside a block, then all of these runs will have the same random seed. This can be fixed, for example, by running {\tt LTIME; ADDRAND} before using the pseudo-random number generator for the first time.
 \begin{itemize}
+\item {\tt F810} --- {\tt RANDU256} ( -- $x$), generates a new pseudo-random unsigned 256-bit {\em Integer}~$x$. The algorithm is as follows: if $r$ is the old value of the random seed, considered as a 32-byte array (by constructing the big-endian representation of an unsigned 256-bit integer), then its $\opsc{sha512}(r)$ is computed; the first 32 bytes of this hash are stored as the new value $r'$ of the random seed, and the remaining 32 bytes are returned as the next random value~$x$.
+\item {\tt F811} --- {\tt RAND} ($y$ -- $z$), generates a new pseudo-random integer $z$ in the range $0\ldots y-1$ (or $y\ldots-1$, if $y<0$). More precisely, an unsigned random value $x$ is generated as in {\tt RAND256U}; then $z:=\lfloor xy/2^{256}\rfloor$ is computed. Equivalent to {\tt RANDU256; MULRSHIFT 256}.
+\item {\tt F814} --- {\tt SETRAND} ($x$ -- ), sets the random seed to unsigned 256-bit {\em Integer\/}~$x$.
+\item {\tt F815} --- {\tt ADDRAND} ($x$ -- ), mixes unsigned 256-bit {\em Integer\/}~$x$ into the random seed $r$ by setting the random seed to $\Sha$ of the concatenation of two 32-byte strings: the first with the big-endian representation of the old seed $r$, and the second with the big-endian representation of $x$.
 \item {\tt F810}--{\tt F81F} --- Reserved for pseudo-random number generator primitives.
 \end{itemize}
 
@@ -2177,8 +2202,8 @@ The following primitives read configuration data provided in the {\em Tuple\/} s
 \item {\tt F823} --- {\tt NOW} ( -- $x$), returns the current Unix time as an {\em Integer}. If it is impossible to recover the requested value starting from {\tt c7}, throws a type checking or range checking exception as appropriate. Equivalent to {\tt GETPARAM 3}.
 \item {\tt F824} --- {\tt BLOCKLT} ( -- $x$), returns the starting logical time of the current block. Equivalent to {\tt GETPARAM 4}.
 \item {\tt F825} --- {\tt LTIME} ( -- $x$), returns the logical time of the current transaction. Equivalent to {\tt GETPARAM 5}.
-\item {\tt F826} --- {\tt BALANCE} ( -- $t$), returns the remaining balance of the smart contract as a {\em Tuple\/} consisting of an {\em Integer} (the remaining Gram balance in nanograms) and a {\em Maybe Cell} (a dictionary with 32-bit keys representing the balance of ``extra currencies''). Equivalent to {\tt GETPARAM 6}. Note that {\tt RAW} primitives such as {\tt SENDRAWMSG} do not update this field. 
-\item {\tt F827} --- {\tt RANDSEED} ( -- $x$), returns the current random seed as an unsigned 256-bit {\em Integer}. Equivalent to {\tt GETPARAM 7}.
+\item {\tt F826} --- {\tt RANDSEED} ( -- $x$), returns the current random seed as an unsigned 256-bit {\em Integer}. Equivalent to {\tt GETPARAM 6}.
+\item {\tt F827} --- {\tt BALANCE} ( -- $t$), returns the remaining balance of the smart contract as a {\em Tuple\/} consisting of an {\em Integer} (the remaining Gram balance in nanograms) and a {\em Maybe Cell} (a dictionary with 32-bit keys representing the balance of ``extra currencies''). Equivalent to {\tt GETPARAM 7}. Note that {\tt RAW} primitives such as {\tt SENDRAWMSG} do not update this field. 
 \item {\tt F828} --- {\tt MYADDR} ( -- $s$), returns the internal address of the current smart contract as a {\em Slice\/} with a {\tt MsgAddressInt}. If necessary, it can be parsed further using primitives such as {\tt PARSESTDADDR} or {\tt REWRITESTDADDR}. Equivalent to {\tt GETPARAM 8}.
 \item {\tt F829} --- {\tt CONFIGROOT} ( -- $D$), returns the {\em Maybe Cell\/}~$D$ with the current global configuration dictionary. Equivalent to {\tt GETPARAM 9}.
 \item {\tt F830} --- {\tt CONFIGDICT} ( -- $D$ $32$), returns the global configuration dictionary along with its key length (32). Equivalent to {\tt CONFIGROOT}; {\tt PUSHINT 32}.
@@ -2203,7 +2228,16 @@ The ``global variables'' may be helpful in implementing some high-level smart-co
 \item {\tt F902} --- {\tt SHA256U} ($s$ -- $x$), computes $\Sha$ of the data bits of~{\em Slice\/}~$s$. If the bit length of $s$ is not divisible by eight, throws a cell underflow exception. The hash value is returned as a 256-bit unsigned integer~$x$.
 \item {\tt F910} --- {\tt CHKSIGNU} ($h$ $s$ $k$ -- $?$), checks the Ed25519-signature $s$ of a hash $h$ (a 256-bit unsigned integer, usually computed as the hash of some data) using public key $k$ (also represented by a 256-bit unsigned integer). The signature $s$ must be a {\em Slice\/} containing at least 512 data bits; only the first 512 bits are used. The result is $-1$ if the signature is valid, $0$ otherwise. Notice that {\tt CHKSIGNU} is equivalent to {\tt ROT}; {\tt NEWB}; {\tt STU 256}; {\tt ENDB}; {\tt NEWC}; {\tt ROTREV}; {\tt CHKSIGNS}, i.e., to {\tt CHKSIGNS} with the first argument $d$ set to 256-bit {\em Slice} containing~$h$. Therefore, if $h$ is computed as the hash of some data, these data are hashed {\em twice}, the second hashing occurring inside {\tt CHKSIGNS}. 
 \item {\tt F911} --- {\tt CHKSIGNS} ($d$ $s$ $k$ -- $?$), checks whether $s$ is a valid Ed25519-signature of the data portion of {\em Slice\/}~$d$ using public key~$k$, similarly to {\tt CHKSIGNU}. If the bit length of {\em Slice\/}~$d$ is not divisible by eight, throws a cell underflow exception. The verification of Ed25519 signatures is the standard one, with $\Sha$ used to reduce $d$ to the 256-bit number that is actually signed. 
-\item {\tt F902}--{\tt F93F} --- Reserved for hashing and cryptography primitives.
+\item {\tt F912}--{\tt F93F} --- Reserved for hashing and cryptography primitives.
+\end{itemize}
+
+\nxsubpoint\emb{Miscellaneous primitives}
+\begin{itemize}
+\item {\tt F940} --- {\tt CDATASIZEQ} ($c$ $n$ -- $x$ $y$ $z$ $-1$ or $0$), recursively computes the count of distinct cells $x$, data bits $y$, and cell references $z$ in the dag rooted at {\em Cell\/} $c$, effectively returning the total storage used by this dag taking into account the identification of equal cells. The values of $x$, $y$, and $z$ are computed by a depth-first traversal of this dag, with a hash table of visited cell hashes used to prevent visits of already-visited cells. The total count of visited cells $x$ cannot exceed non-negative {\em Integer\/}~$n$; otherwise the computation is aborted before visiting the $(n+1)$-st cell and a zero is returned to indicate failure. If $c$ is {\em Null}, returns $x=y=z=0$.
+\item {\tt F941} --- {\tt CDATASIZE} ($c$ $n$ -- $x$ $y$ $z$), a non-quiet version of {\tt CDATASIZEQ} that throws a cell overflow exception (8) on failure.
+\item {\tt F942} --- {\tt SDATASIZEQ} ($s$ $n$ -- $x$ $y$ $z$ $-1$ or $0$), similar to {\tt CDATASIZEQ}, but accepting a {\em Slice\/}~$s$ instead of a {\em Cell\/}. The returned value of $x$ does not take into account the cell that contains the slice~$s$ itself; however, the data bits and the cell references of $s$ are accounted for in $y$ and~$z$.
+\item {\tt F943} --- {\tt SDATASIZE} ($s$ $n$ -- $x$ $y$ $z$), a non-quiet version of {\tt SDATASIZEQ} that throws a cell overflow exception (8) on failure.
+\item {\tt F944}--{\tt F97F} --- Reserved for miscellaneous TON-specific primitives that do not fall into any other specific category.
 \end{itemize}
 
 \nxsubpoint\emb{Currency manipulation primitives}
@@ -2264,8 +2298,8 @@ The following primitives, which use the above conventions, are defined:
 \nxsubpoint\emb{Outbound message and output action primitives}
 \begin{itemize}
 \item {\tt FB00} --- {\tt SENDRAWMSG} ($c$ $x$ -- ), sends a raw message contained in {\em Cell $c$}, which should contain a correctly serialized object {\tt Message $X$}, with the only exception that the source address is allowed to have dummy value {\tt addr\_none} (to be automatically replaced with the current smart-contract address), and {\tt ihr\_fee}, {\tt fwd\_fee}, {\tt created\_lt} and {\tt created\_at} fields can have arbitrary values (to be rewritten with correct values during the action phase of the current transaction). Integer parameter $x$ contains the flags. Currently $x=0$ is used for ordinary messages; $x=128$ is used for messages that are to carry all the remaining balance of the current smart contract (instead of the value originally indicated in the message); $x=64$ is used for messages that carry all the remaining value of the inbound message in addition to the value initially indicated in the new message (if bit 0 is not set, the gas fees are deducted from this amount); $x'=x+1$ means that the sender wants to pay transfer fees separately; $x'=x+2$ means that any errors arising while processing this message during the action phase should be ignored.
-\item {\tt FB02} --- {\tt RAWRESERVE} ($x$ $y$ -- ), creates an output action which would reserve exactly $x$ nanograms (if $y=0$), at most $x$ nanograms (if $y=2$), or all but $x$ nanograms (if $y=1$ or $y=3$), from the remaining balance of the account. It is roughly equivalent to creating an outbound message carrying $x$ nanograms (or $b-x$ nanograms, where $b$ is the remaining balance) to oneself, so that the subsequent output actions would not be able to spend more money than the remainder. Bit $+2$ in $y$ means that the external action does not fail if the specified amount cannot be reserved; instead, all remaining balance is reserved. Currently $x$ must be a non-negative integer, and $y$ must be in the range $0\ldots 3$.
-\item {\tt FB03} --- {\tt RAWRESERVEX} ($s$ $y$ -- ), similar to {\tt RAWRESERVE}, but accepts a {\em Slice $s$} with a {\em CurrencyCollection\/} as an argument. In this way currencies other than Grams can be reserved.
+\item {\tt FB02} --- {\tt RAWRESERVE} ($x$ $y$ -- ), creates an output action which would reserve exactly $x$ nanograms (if $y=0$), at most $x$ nanograms (if $y=2$), or all but $x$ nanograms (if $y=1$ or $y=3$), from the remaining balance of the account. It is roughly equivalent to creating an outbound message carrying $x$ nanograms (or $b-x$ nanograms, where $b$ is the remaining balance) to oneself, so that the subsequent output actions would not be able to spend more money than the remainder. Bit $+2$ in $y$ means that the external action does not fail if the specified amount cannot be reserved; instead, all remaining balance is reserved. Bit $+8$ in $y$ means $x\leftarrow -x$ before performing any further actions. Bit $+4$ in $y$ means that $x$ is increased by the original balance of the current account (before the compute phase), including all extra currencies, before performing any other checks and actions. Currently $x$ must be a non-negative integer, and $y$ must be in the range $0\ldots 15$.
+\item {\tt FB03} --- {\tt RAWRESERVEX} ($x$ $D$ $y$ -- ), similar to {\tt RAWRESERVE}, but also accepts a dictionary~$D$ (represented by a {\em Cell\/} or {\em Null\/}) with extra currencies. In this way currencies other than Grams can be reserved.
 \item {\tt FB04} --- {\tt SETCODE} ($c$ -- ), creates an output action that would change this smart contract code to that given by {\em Cell\/}~$c$. Notice that this change will take effect only after the successful termination of the current run of the smart contract.
 \item {\tt FB06} --- {\tt SETLIBCODE} ($c$ $x$ -- ), creates an output action that would modify the collection of this smart contract libraries by adding or removing library with code given in {\em Cell\/}~$c$. If $x=0$, the library is actually removed if it was previously present in the collection (if not, this action does nothing). If $x=1$, the library is added as a private library, and if $x=2$, the library is added as a public library (and becomes available to all smart contracts if the current smart contract resides in the masterchain); if the library was present in the collection before, its public/private status is changed according to $x$. Values of $x$ other than $0\ldots 2$ are invalid.
 \item {\tt FB07} --- {\tt CHANGELIB} ($h$ $x$ -- ), creates an output action similarly to {\tt SETLIBCODE}, but instead of the library code accepts its hash as an unsigned 256-bit integer $h$. If $x\neq0$ and the library with hash $h$ is absent from the library collection of this smart contract, this output action will fail.

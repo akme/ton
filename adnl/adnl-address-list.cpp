@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "adnl-address-list.hpp"
 #include "adnl-peer-table.h"
@@ -153,6 +153,16 @@ td::Result<AdnlAddressList> AdnlAddressList::create(const tl_object_ptr<ton_api:
     return td::Status::Error(ErrorCode::protoviolation, PSTRING() << "too big addr list: size=" << A.serialized_size());
   }
   return A;
+}
+
+td::Status AdnlAddressList::add_udp_address(td::IPAddress addr) {
+  if (addr.is_ipv4()) {
+    auto r = td::make_ref<AdnlAddressUdp>(addr.get_ipv4(), static_cast<td::uint16>(addr.get_port()));
+    addrs_.push_back(std::move(r));
+    return td::Status::OK();
+  } else {
+    return td::Status::Error(ErrorCode::protoviolation, "only works with ipv4");
+  }
 }
 
 }  // namespace adnl

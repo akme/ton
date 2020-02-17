@@ -922,7 +922,7 @@ void CppTypeCode::generate_get_tag_param1(std::ostream& os, std::string nl, cons
       match_param_pattern(os, nl, A, 8, "# > 1 && (# & 1)", param_names[0])) {
     return;
   }
-  os << nl << "static inline size_t nat_abs(int x) { return (x > 1) * 2 + (x & 1); }";
+  os << nl << "// static inline size_t nat_abs(int x) { return (x > 1) * 2 + (x & 1); }";
   os << nl << "static signed char ctab[4] = { ";
   for (int i = 0; i < 4; i++) {
     if (i > 0) {
@@ -941,7 +941,7 @@ void CppTypeCode::generate_get_tag_param2(std::ostream& os, std::string nl, cons
       os << ' ' << (int)A[i][j];
     }
   }
-  os << nl << "static inline size_t nat_abs(int x) { return (x > 1) * 2 + (x & 1); }";
+  os << nl << "// static inline size_t nat_abs(int x) { return (x > 1) * 2 + (x & 1); }";
   os << nl << "static signed char ctab[4][4] = { ";
   for (int i = 0; i < 16; i++) {
     if (i > 0) {
@@ -964,7 +964,7 @@ void CppTypeCode::generate_get_tag_param3(std::ostream& os, std::string nl, cons
       }
     }
   }
-  os << nl << "static inline size_t nat_abs(int x) { return (x > 1) * 2 + (x & 1); }";
+  os << nl << "// static inline size_t nat_abs(int x) { return (x > 1) * 2 + (x & 1); }";
   os << nl << "static signed char ctab[4][4][4] = { ";
   for (int i = 0; i < 64; i++) {
     if (i > 0) {
@@ -3257,6 +3257,31 @@ void generate_type_constants(std::ostream& os, int mode) {
   }
 }
 
+void generate_register_function(std::ostream& os, int mode) {
+  os << "\n// " << (mode ? "definition" : "declaration") << " of type name registration function\n";
+  if (!mode) {
+    os << "extern bool register_simple_types(std::function<bool(const char*, const TLB*)> func);\n";
+    return;
+  }
+  os << "bool register_simple_types(std::function<bool(const char*, const TLB*)> func) {\n";
+  os << "  return ";
+  int k = 0;
+  for (int i = builtin_types_num; i < types_num; i++) {
+    Type& type = types[i];
+    CppTypeCode& cc = *cpp_type[i];
+    if (!cc.cpp_type_var_name.empty() && type.type_name) {
+      if (k++) {
+        os << "\n      && ";
+      }
+      os << "func(\"" << type.get_name() << "\", &" << cc.cpp_type_var_name << ")";
+    }
+  }
+  if (!k) {
+    os << "true";
+  }
+  os << ";\n}\n\n";
+}
+
 void assign_const_type_cpp_idents() {
   const_type_expr_cpp_idents.resize(const_type_expr_num + 1, "");
   const_type_expr_simple.resize(const_type_expr_num + 1, false);
@@ -3389,6 +3414,7 @@ void generate_cpp_output_to(std::ostream& os, int options = 0, std::vector<std::
         cc.generate(os, (options & -4) | pass);
       }
       generate_type_constants(os, pass - 1);
+      generate_register_function(os, pass - 1);
     }
   }
   for (auto it = cpp_namespace_list.rbegin(); it != cpp_namespace_list.rend(); ++it) {

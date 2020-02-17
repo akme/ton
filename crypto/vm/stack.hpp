@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
 
@@ -135,6 +135,9 @@ class StackEntry {
     tp = t_null;
     return *this;
   }
+  bool set_int(td::RefInt256 value) {
+    return set(t_int, std::move(value));
+  }
   bool empty() const {
     return tp == t_null;
   }
@@ -166,6 +169,10 @@ class StackEntry {
   Type type() const {
     return tp;
   }
+  // mode: +1 = disable short ints, +2 = disable continuations
+  bool serialize(vm::CellBuilder& cb, int mode = 0) const;
+  bool deserialize(vm::CellSlice& cs, int mode = 0);
+  bool deserialize(Ref<Cell> cell, int mode = 0);
 
  private:
   static bool is_list(const StackEntry* se);
@@ -192,6 +199,11 @@ class StackEntry {
   template <typename T, Type tag>
   Ref<T> move_as() & {
     return tp == tag ? Ref<T>{td::static_cast_ref(), std::move(ref)} : td::Ref<T>{};
+  }
+  bool set(Type _tp, RefAny _ref) {
+    tp = _tp;
+    ref = std::move(_ref);
+    return ref.not_null() || tp == t_null;
   }
 
  public:
@@ -336,6 +348,10 @@ class Stack : public td::CntObject {
   void pop_many(int count) {
     stack.resize(stack.size() - count);
   }
+  void pop_many(int count, int offs) {
+    std::move(stack.cend() - offs, stack.cend(), stack.end() - (count + offs));
+    pop_many(count);
+  }
   void drop_bottom(int count) {
     std::move(stack.cbegin() + count, stack.cend(), stack.begin());
     pop_many(count);
@@ -469,6 +485,18 @@ class Stack : public td::CntObject {
   Ref<Atom> pop_atom();
   std::string pop_string();
   std::string pop_bytes();
+  template <typename T>
+  Ref<T> pop_object() {
+    return pop_chk().as_object<T>();
+  }
+  template <typename T>
+  Ref<T> pop_object_type_chk() {
+    auto res = pop_object<T>();
+    if (!res) {
+      throw VmError{Excno::type_chk, "not an object of required type"};
+    }
+    return res;
+  }
   void push_null();
   void push_int(td::RefInt256 val);
   void push_int_quiet(td::RefInt256 val, bool quiet = true);
@@ -508,6 +536,9 @@ class Stack : public td::CntObject {
   }
   // mode: +1 = add eoln, +2 = Lisp-style lists
   void dump(std::ostream& os, int mode = 1) const;
+  bool serialize(vm::CellBuilder& cb, int mode = 0) const;
+  bool deserialize(vm::CellSlice& cs, int mode = 0);
+  static bool deserialize_to(vm::CellSlice& cs, Ref<Stack>& stack, int mode = 0);
 };
 
 }  // namespace vm

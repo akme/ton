@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "adnl-peer.h"
 #include "adnl-peer.hpp"
@@ -131,7 +131,12 @@ void AdnlPeerPairImpl::receive_packet_checked(AdnlPacket packet) {
   }
   if (packet.dst_reinit_date() > 0 && packet.dst_reinit_date() < d) {
     if (!packet.addr_list().empty()) {
-      update_addr_list(packet.addr_list());
+      auto addr_list = packet.addr_list();
+      if (packet.remote_addr().is_valid() && addr_list.size() == 0) {
+        VLOG(ADNL_DEBUG) << "adding implicit address " << packet.remote_addr();
+        addr_list.add_udp_address(packet.remote_addr());
+      }
+      update_addr_list(std::move(addr_list));
     }
     if (!packet.priority_addr_list().empty()) {
       update_addr_list(packet.priority_addr_list());
@@ -159,7 +164,9 @@ void AdnlPeerPairImpl::receive_packet_checked(AdnlPacket packet) {
   // accepted
   // delivering
 
-  add_received_packet(static_cast<td::uint32>(packet.seqno()));
+  if (packet.seqno() > 0) {
+    add_received_packet(static_cast<td::uint32>(packet.seqno()));
+  }
 
   if (packet.confirm_seqno() > ack_seqno_) {
     ack_seqno_ = packet.confirm_seqno();
@@ -174,7 +181,12 @@ void AdnlPeerPairImpl::receive_packet_checked(AdnlPacket packet) {
   }
 
   if (!packet.addr_list().empty()) {
-    update_addr_list(packet.addr_list());
+    auto addr_list = packet.addr_list();
+    if (packet.remote_addr().is_valid() && addr_list.size() == 0) {
+      VLOG(ADNL_DEBUG) << "adding implicit address " << packet.remote_addr();
+      addr_list.add_udp_address(packet.remote_addr());
+    }
+    update_addr_list(std::move(addr_list));
   }
   if (!packet.priority_addr_list().empty()) {
     update_addr_list(packet.priority_addr_list());
@@ -642,7 +654,7 @@ void AdnlPeerPairImpl::update_addr_list(AdnlAddressList addr_list) {
   if (addr_list.empty()) {
     return;
   }
-  CHECK(addr_list.size() > 0);
+  //CHECK(addr_list.size() > 0);
 
   if (addr_list.reinit_date() > td::Clocks::system() + 60) {
     VLOG(ADNL_WARNING) << "dropping addr list with too new reinit date";

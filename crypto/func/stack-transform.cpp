@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "func.h"
 
@@ -332,6 +332,13 @@ bool StackTransform::apply_pop(int i) {
   } else {
     return set(i, get(0)) && shift(1);
   }
+}
+
+bool StackTransform::apply_blkpop(int k) {
+  if (!is_valid() || k < 0) {
+    return invalidate();
+  }
+  return !k || (touch(k - 1) && shift(k));
 }
 
 bool StackTransform::equal(const StackTransform &other, bool relaxed) const {
@@ -735,6 +742,28 @@ bool StackTransform::is_blkdrop(int *i) const {
   return false;
 }
 
+// 0 1 .. j-1 j+i j+i+1 ...
+bool StackTransform::is_blkdrop2(int i, int j) const {
+  if (!is_valid() || d != i || i <= 0 || j < 0 || dp < i + j || n != j || !is_trivial_after(j)) {
+    return false;
+  }
+  for (int s = 0; s < j; s++) {
+    if (get(s) != s) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool StackTransform::is_blkdrop2(int *i, int *j) const {
+  if (is_valid() && is_blkdrop2(d, n)) {
+    *i = d;
+    *j = n;
+    return true;
+  }
+  return false;
+}
+
 // equivalent to i times PUSH s(j)
 bool StackTransform::is_blkpush(int *i, int *j) const {
   if (!is_valid() || d >= 0) {
@@ -798,6 +827,77 @@ bool StackTransform::is_nip_seq(int *i, int *j) const {
   } else {
     return false;
   }
+}
+
+// POP s(i); BLKDROP k  (usually for i >= k >= 0)
+bool StackTransform::is_pop_blkdrop(int i, int k) const {
+  StackTransform t;
+  return is_valid() && d == k + 1 && t.apply_pop(i) && t.apply_blkpop(k) && t <= *this;
+}
+
+// POP s(i); BLKDROP k == XCHG s0,s(i); BLKDROP k+1  for i >= k >= 0
+// k+1 k+2 .. i-1 0 i+1 ..
+bool StackTransform::is_pop_blkdrop(int *i, int *k) const {
+  if (is_valid() && n == 1 && d > 0 && !A[0].second) {
+    *k = d - 1;
+    *i = A[0].first;
+    return is_pop_blkdrop(*i, *k);
+  } else {
+    return false;
+  }
+}
+
+// POP s(i); POP s(j); BLKDROP k  (usually for i<>j >= k >= 0)
+bool StackTransform::is_2pop_blkdrop(int i, int j, int k) const {
+  StackTransform t;
+  return is_valid() && d == k + 2 && t.apply_pop(i) && t.apply_pop(j) && t.apply_blkpop(k) && t <= *this;
+}
+
+// POP s(i); POP s(j); BLKDROP k == XCHG s0,s(i); XCHG s1,s(j+1); BLKDROP k+2 (usually for i<>j >= k >= 2)
+// k+2 k+3 .. i-1 0 i+1 ... j 1 j+2 ...
+bool StackTransform::is_2pop_blkdrop(int *i, int *j, int *k) const {
+  if (is_valid() && n == 2 && d >= 2 && A[0].second + A[1].second == 1) {
+    *k = d - 2;
+    int t = (A[0].second > 0);
+    *i = A[t].first;
+    *j = A[1 - t].first - 1;
+    return is_2pop_blkdrop(*i, *j, *k);
+  } else {
+    return false;
+  }
+}
+
+// PUSHCONST c ; ROT == 1 -1000 0 2 3
+bool StackTransform::is_const_rot(int c) const {
+  return is_valid() && d == -1 && is_trivial_after(3) && get(0) == 1 && c <= c_start && get(1) == c && get(2) == 0;
+}
+
+bool StackTransform::is_const_rot(int *c) const {
+  return is_valid() && (*c = get(1)) <= c_start && is_const_rot(*c);
+}
+
+// PUSHCONST c ; POP s(i) == 0 1 .. i-1 -1000 i+1 ...
+bool StackTransform::is_const_pop(int c, int i) const {
+  return is_valid() && !d && n == 1 && i > 0 && c <= c_start && get(i - 1) == c;
+}
+
+bool StackTransform::is_const_pop(int *c, int *i) const {
+  if (is_valid() && !d && n == 1 && A[0].second <= c_start) {
+    *i = A[0].first + 1;
+    *c = A[0].second;
+    return is_const_pop(*c, *i);
+  } else {
+    return false;
+  }
+}
+
+// PUSH i ; PUSHCONST c == c i 0 1 2 ...
+bool StackTransform::is_push_const(int i, int c) const {
+  return is_valid() && d == -2 && c <= c_start && i >= 0 && is_trivial_after(2) && get(0) == c && get(1) == i;
+}
+
+bool StackTransform::is_push_const(int *i, int *c) const {
+  return is_valid() && d == -2 && n == 2 && is_push_const(*i = get(1), *c = get(0));
 }
 
 void StackTransform::show(std::ostream &os, int mode) const {

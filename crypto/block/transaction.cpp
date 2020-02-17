@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "block/transaction.h"
 #include "block/block.h"
@@ -23,7 +23,7 @@
 #include "td/utils/bits.h"
 #include "td/utils/uint128.h"
 #include "ton/ton-shard.h"
-#include "vm/continuation.h"
+#include "vm/vm.h"
 
 namespace block {
 using td::Ref;
@@ -463,6 +463,7 @@ Transaction::Transaction(const Account& _account, int ttype, ton::LogicalTime re
     , my_addr(_account.my_addr)
     , my_addr_exact(_account.my_addr_exact)
     , balance(_account.balance)
+    , original_balance(_account.balance)
     , due_payment(_account.due_payment)
     , last_paid(_account.last_paid)
     , new_code(_account.code)
@@ -691,12 +692,16 @@ bool ComputePhaseConfig::parse_GasLimitsPrices(Ref<vm::CellSlice> cs, td::RefInt
   }
   block::gen::GasLimitsPrices::Record_gas_flat_pfx flat;
   if (tlb::csr_unpack(cs, flat)) {
-    bool ok = parse_GasLimitsPrices(std::move(flat.other), freeze_due_limit, delete_due_limit);
-    flat_gas_limit = flat.flat_gas_limit;
-    flat_gas_price = flat.flat_gas_price;
-    return ok;
+    return parse_GasLimitsPrices_internal(std::move(flat.other), freeze_due_limit, delete_due_limit,
+                                          flat.flat_gas_limit, flat.flat_gas_price);
+  } else {
+    return parse_GasLimitsPrices_internal(std::move(cs), freeze_due_limit, delete_due_limit);
   }
-  flat_gas_limit = flat_gas_price = 0;
+}
+
+bool ComputePhaseConfig::parse_GasLimitsPrices_internal(Ref<vm::CellSlice> cs, td::RefInt256& freeze_due_limit,
+                                                        td::RefInt256& delete_due_limit, td::uint64 _flat_gas_limit,
+                                                        td::uint64 _flat_gas_price) {
   auto f = [&](const auto& r, td::uint64 spec_limit) {
     gas_limit = r.gas_limit;
     special_gas_limit = spec_limit;
@@ -716,6 +721,8 @@ bool ComputePhaseConfig::parse_GasLimitsPrices(Ref<vm::CellSlice> cs, td::RefInt
       return false;
     }
   }
+  flat_gas_limit = _flat_gas_limit;
+  flat_gas_price = _flat_gas_price;
   compute_threshold();
   return true;
 }
@@ -906,6 +913,7 @@ bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
   // ...
   compute_phase = std::make_unique<ComputePhase>();
   ComputePhase& cp = *(compute_phase.get());
+  original_balance -= total_fees;
   if (td::sgn(balance.grams) <= 0) {
     // no gas
     cp.skip_reason = ComputePhase::sk_no_gas;
@@ -1010,10 +1018,9 @@ bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
       total_fees += cp.gas_fees;
       balance -= cp.gas_fees;
     }
-    if (verbosity > 2) {
-      std::cerr << "gas fees: " << cp.gas_fees << " = " << cfg.gas_price256 << " * " << cp.gas_used
-                << " /2^16 ; price=" << cfg.gas_price << "; remaining balance=" << balance << std::endl;
-    }
+    LOG(DEBUG) << "gas fees: " << cp.gas_fees->to_dec_string() << " = " << cfg.gas_price256->to_dec_string() << " * "
+               << cp.gas_used << " /2^16 ; price=" << cfg.gas_price << "; flat rate=[" << cfg.flat_gas_price << " for "
+               << cfg.flat_gas_limit << "]; remaining balance=" << balance.to_str();
     CHECK(td::sgn(balance.grams) >= 0);
   }
   return true;
@@ -1645,7 +1652,7 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
 
 int Transaction::try_action_reserve_currency(vm::CellSlice& cs, ActionPhase& ap, const ActionPhaseConfig& cfg) {
   block::gen::OutAction::Record_action_reserve_currency rec;
-  if (!tlb::unpack_exact(cs, rec) || (rec.mode & ~3)) {
+  if (!tlb::unpack_exact(cs, rec) || (rec.mode & ~15)) {
     return -1;
   }
   int mode = rec.mode;
@@ -1656,7 +1663,21 @@ int Transaction::try_action_reserve_currency(vm::CellSlice& cs, ActionPhase& ap,
     return -1;
   }
   LOG(DEBUG) << "action_reserve_currency: mode=" << mode << ", reserve=" << reserve.to_str()
-             << ", balance=" << ap.remaining_balance.to_str();
+             << ", balance=" << ap.remaining_balance.to_str() << ", original balance=" << original_balance.to_str();
+  if (mode & 4) {
+    if (mode & 8) {
+      reserve = original_balance - reserve;
+    } else {
+      reserve += original_balance;
+    }
+  } else if (mode & 8) {
+    LOG(DEBUG) << "invalid reserve mode " << mode;
+    return -1;
+  }
+  if (!reserve.is_valid() || td::sgn(reserve.grams) < 0) {
+    LOG(DEBUG) << "cannot reserve a negative amount: " << reserve.to_str();
+    return -1;
+  }
   if (reserve.grams > ap.remaining_balance.grams) {
     if (mode & 2) {
       reserve.grams = ap.remaining_balance.grams;
