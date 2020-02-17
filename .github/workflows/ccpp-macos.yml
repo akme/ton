@@ -28,7 +28,9 @@ jobs:
       run: |
         cd build
         make -j4
+        mkdir bins
+        for x in `find . -type f -perm -u+x|grep -vi cmake`; do cp -av $x bins;done
     - uses: actions/upload-artifact@master
       with:
-        name: libtonlibjson.dylib
-        path: build/tonlib/
+        name: bins
+        path: build/bins/
