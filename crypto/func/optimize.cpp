@@ -393,12 +393,36 @@ bool Optimizer::is_xchg(int* i, int* j) {
   return is_pred([i, j](const auto& t) { return t.is_xchg(i, j) && ((*i < 16 && *j < 16) || (!*i && *j < 256)); });
 }
 
+bool Optimizer::is_xchg_xchg(int* i, int* j, int* k, int* l) {
+  return is_pred([i, j, k, l](const auto& t) {
+           return t.is_xchg_xchg(i, j, k, l) && (*i < 2 && *j < (*i ? 16 : 256) && *k < 2 && *l < (*k ? 16 : 256));
+         }) &&
+         (!(p_ == 2 && op_[0]->is_xchg(*i, *j) && op_[1]->is_xchg(*k, *l)));
+}
+
 bool Optimizer::is_push(int* i) {
   return is_pred([i](const auto& t) { return t.is_push(i) && *i < 256; });
 }
 
 bool Optimizer::is_pop(int* i) {
   return is_pred([i](const auto& t) { return t.is_pop(i) && *i < 256; });
+}
+
+bool Optimizer::is_pop_pop(int* i, int* j) {
+  return is_pred([i, j](const auto& t) { return t.is_pop_pop(i, j) && *i < 256 && *j < 256; }, 3);
+}
+
+bool Optimizer::is_push_rot(int* i) {
+  return is_pred([i](const auto& t) { return t.is_push_rot(i) && *i < 16; }, 3);
+}
+
+bool Optimizer::is_push_rotrev(int* i) {
+  return is_pred([i](const auto& t) { return t.is_push_rotrev(i) && *i < 16; }, 3);
+}
+
+bool Optimizer::is_push_xchg(int* i, int* j, int* k) {
+  return is_pred([i, j, k](const auto& t) { return t.is_push_xchg(i, j, k) && *i < 16 && *j < 16 && *k < 16; }) &&
+         !(p_ == 2 && op_[0]->is_push() && op_[1]->is_xchg());
 }
 
 bool Optimizer::is_xchg2(int* i, int* j) {
@@ -434,7 +458,8 @@ bool Optimizer::is_xcpu2(int* i, int* j, int* k) {
 }
 
 bool Optimizer::is_puxc2(int* i, int* j, int* k) {
-  return is_pred([i, j, k](const auto& t) { return t.is_puxc2(i, j, k) && *i < 16 && *j < 15 && *k < 15; });
+  return is_pred(
+      [i, j, k](const auto& t) { return t.is_puxc2(i, j, k) && *i < 16 && *j < 15 && *k < 15 && *j + *k != -1; });
 }
 
 bool Optimizer::is_puxcpu(int* i, int* j, int* k) {
@@ -529,12 +554,13 @@ bool Optimizer::find_at_least(int pb) {
   p_ = q_ = 0;
   pb_ = pb;
   // show_stack_transforms();
-  int i = -100, j = -100, k = -100, c = 0;
+  int i, j, k, l, c;
   return (is_push_const(&i, &c) && rewrite_push_const(i, c)) || (is_nop() && rewrite_nop()) ||
          (!(mode_ & 1) && is_const_rot(&c) && rewrite_const_rot(c)) ||
          (is_const_push_xchgs() && rewrite_const_push_xchgs()) || (is_const_pop(&c, &i) && rewrite_const_pop(c, i)) ||
          (is_xchg(&i, &j) && rewrite(AsmOp::Xchg(i, j))) || (is_push(&i) && rewrite(AsmOp::Push(i))) ||
-         (is_pop(&i) && rewrite(AsmOp::Pop(i))) ||
+         (is_pop(&i) && rewrite(AsmOp::Pop(i))) || (is_pop_pop(&i, &j) && rewrite(AsmOp::Pop(i), AsmOp::Pop(j))) ||
+         (is_xchg_xchg(&i, &j, &k, &l) && rewrite(AsmOp::Xchg(i, j), AsmOp::Xchg(k, l))) ||
          (!(mode_ & 1) &&
           ((is_rot() && rewrite(AsmOp::Custom("ROT", 3, 3))) || (is_rotrev() && rewrite(AsmOp::Custom("-ROT", 3, 3))) ||
            (is_2dup() && rewrite(AsmOp::Custom("2DUP", 2, 4))) ||
@@ -545,6 +571,9 @@ bool Optimizer::find_at_least(int pb) {
            (is_xcpu(&i, &j) && rewrite(AsmOp::XcPu(i, j))) || (is_puxc(&i, &j) && rewrite(AsmOp::PuXc(i, j))) ||
            (is_push2(&i, &j) && rewrite(AsmOp::Push2(i, j))) || (is_blkswap(&i, &j) && rewrite(AsmOp::BlkSwap(i, j))) ||
            (is_blkpush(&i, &j) && rewrite(AsmOp::BlkPush(i, j))) || (is_blkdrop(&i) && rewrite(AsmOp::BlkDrop(i))) ||
+           (is_push_rot(&i) && rewrite(AsmOp::Push(i), AsmOp::Custom("ROT"))) ||
+           (is_push_rotrev(&i) && rewrite(AsmOp::Push(i), AsmOp::Custom("-ROT"))) ||
+           (is_push_xchg(&i, &j, &k) && rewrite(AsmOp::Push(i), AsmOp::Xchg(j, k))) ||
            (is_reverse(&i, &j) && rewrite(AsmOp::BlkReverse(i, j))) ||
            (is_nip_seq(&i, &j) && rewrite(AsmOp::Xchg(i, j), AsmOp::BlkDrop(i))) ||
            (is_pop_blkdrop(&i, &k) && rewrite(AsmOp::Pop(i), AsmOp::BlkDrop(k))) ||
@@ -612,10 +641,9 @@ void optimize_code(AsmOpList& ops) {
   for (auto it = ops.list_.rbegin(); it < ops.list_.rend(); ++it) {
     op_list = AsmOpCons::cons(std::make_unique<AsmOp>(std::move(*it)), std::move(op_list));
   }
-  op_list = optimize_code(std::move(op_list), 1);
-  op_list = optimize_code(std::move(op_list), 1);
-  op_list = optimize_code(std::move(op_list), 0);
-  op_list = optimize_code(std::move(op_list), 0);
+  for (int mode : {1, 1, 1, 1, 0, 0, 0, 0}) {
+    op_list = optimize_code(std::move(op_list), mode);
+  }
   ops.list_.clear();
   while (op_list) {
     ops.list_.push_back(std::move(*(op_list->car)));

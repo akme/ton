@@ -103,7 +103,12 @@ class VmState final : public VmStateInterface {
     cell_reload_gas_price = 25,
     cell_create_gas_price = 500,
     exception_gas_price = 50,
-    tuple_entry_gas_price = 1
+    tuple_entry_gas_price = 1,
+    implicit_jmpref_gas_price = 10,
+    implicit_ret_gas_price = 5,
+    free_stack_depth = 32,
+    stack_entry_gas_price = 1,
+    max_data_depth = 512
   };
   VmState();
   VmState(Ref<CellSlice> _code);
@@ -138,9 +143,17 @@ class VmState final : public VmStateInterface {
   void consume_tuple_gas(unsigned tuple_len) {
     consume_gas(tuple_len * tuple_entry_gas_price);
   }
-  void consume_tuple_gas(const Ref<vm::Tuple>& tup) {
+  void consume_tuple_gas(const Ref<Tuple>& tup) {
     if (tup.not_null()) {
       consume_tuple_gas((unsigned)tup->size());
+    }
+  }
+  void consume_stack_gas(unsigned stack_depth) {
+    consume_gas((std::max(stack_depth, (unsigned)free_stack_depth) - free_stack_depth) * stack_entry_gas_price);
+  }
+  void consume_stack_gas(const Ref<Stack>& stk) {
+    if (stk.not_null()) {
+      consume_stack_gas((unsigned)stk->depth());
     }
   }
   GasLimits get_gas_limits() const {
@@ -291,11 +304,8 @@ class VmState final : public VmStateInterface {
     return cont->is_unique() ? cont.unique_write().jump_w(this) : cont->jump(this);
   }
   static Ref<CellSlice> convert_code_cell(Ref<Cell> code_cell);
-  void commit() {
-    cstate.c4 = cr.d[0];
-    cstate.c5 = cr.d[1];
-    cstate.committed = true;
-  }
+  bool try_commit();
+  void force_commit();
 
   void set_chksig_always_succeed(bool flag) {
     chksig_always_succeed = flag;

@@ -934,7 +934,7 @@ struct AsmOp {
   void out_indent_nl(std::ostream& os, bool no_nl = false) const;
   std::string to_string() const;
   void compute_gconst() {
-    gconst = (is_custom() && (op == "PUSHNULL" || op == "NEWC"));
+    gconst = (is_custom() && (op == "PUSHNULL" || op == "NEWC" || op == "NEWB" || op == "TRUE" || op == "FALSE"));
   }
   bool is_nop() const {
     return t == a_none && op.empty();
@@ -974,6 +974,9 @@ struct AsmOp {
     *x = a;
     *y = b;
     return is_xchg();
+  }
+  bool is_xchg_short() const {
+    return is_xchg() && (a <= 1 || b <= 1);
   }
   bool is_swap() const {
     return is_xchg(0, 1);
@@ -1265,12 +1268,22 @@ struct StackTransform {
   }
   bool is_xchg(int i, int j) const;
   bool is_xchg(int* i, int* j) const;
+  bool is_xchg_xchg(int i, int j, int k, int l) const;
+  bool is_xchg_xchg(int* i, int* j, int* k, int* l) const;
   bool is_push(int i) const;
   bool is_push(int* i) const;
   bool is_pop(int i) const;
   bool is_pop(int* i) const;
+  bool is_pop_pop(int i, int j) const;
+  bool is_pop_pop(int* i, int* j) const;
   bool is_rot() const;
   bool is_rotrev() const;
+  bool is_push_rot(int i) const;
+  bool is_push_rot(int* i) const;
+  bool is_push_rotrev(int i) const;
+  bool is_push_rotrev(int* i) const;
+  bool is_push_xchg(int i, int j, int k) const;
+  bool is_push_xchg(int* i, int* j, int* k) const;
   bool is_xchg2(int i, int j) const;
   bool is_xchg2(int* i, int* j) const;
   bool is_xcpu(int i, int j) const;
@@ -1401,9 +1414,14 @@ struct Optimizer {
   bool is_2swap();
   bool is_2over();
   bool is_xchg(int* i, int* j);
+  bool is_xchg_xchg(int* i, int* j, int* k, int* l);
   bool is_push(int* i);
   bool is_pop(int* i);
+  bool is_pop_pop(int* i, int* j);
   bool is_nop();
+  bool is_push_rot(int* i);
+  bool is_push_rotrev(int* i);
+  bool is_push_xchg(int* i, int* j, int* k);
   bool is_xchg2(int* i, int* j);
   bool is_xcpu(int* i, int* j);
   bool is_puxc(int* i, int* j);

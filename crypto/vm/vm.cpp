@@ -176,8 +176,10 @@ int VmState::call(Ref<Continuation> cont, int pass_args, int ret_args) {
       if (skip > 0) {
         get_stack().pop_many(skip);
       }
+      consume_stack_gas(new_stk);
     } else if (copy >= 0) {
       new_stk = get_stack().split_top(copy, skip);
+      consume_stack_gas(new_stk);
     } else {
       new_stk = std::move(stack);
       stack.clear();
@@ -196,7 +198,13 @@ int VmState::call(Ref<Continuation> cont, int pass_args, int ret_args) {
       throw VmError{Excno::stk_und, "stack underflow while calling a continuation: not enough arguments on stack"};
     }
     // create new stack from the top `pass_args` elements of the current stack
-    Ref<Stack> new_stk = (pass_args >= 0 ? get_stack().split_top(pass_args) : std::move(stack));
+    Ref<Stack> new_stk;
+    if (pass_args >= 0) {
+      new_stk = get_stack().split_top(pass_args);
+      consume_stack_gas(new_stk);
+    } else {
+      new_stk = std::move(stack);
+    }
     // create return continuation using the remainder of the current stack
     Ref<OrdCont> ret = Ref<OrdCont>{true, std::move(code), cp, std::move(stack), ret_args};
     ret.unique_write().get_cdata()->save.set_c0(std::move(cr.c[0]));
@@ -251,10 +259,12 @@ int VmState::jump(Ref<Continuation> cont, int pass_args) {
         new_stk = cont_data->stack;
       }
       new_stk.write().move_from_stack(get_stack(), copy);
+      consume_stack_gas(new_stk);
       set_stack(std::move(new_stk));
     } else {
-      if (copy >= 0) {
+      if (copy >= 0 && copy < stack->depth()) {
         get_stack().drop_bottom(stack->depth() - copy);
+        consume_stack_gas(copy);
       }
     }
     return jump_to(std::move(cont));
@@ -264,8 +274,10 @@ int VmState::jump(Ref<Continuation> cont, int pass_args) {
       int depth = get_stack().depth();
       if (pass_args > depth) {
         throw VmError{Excno::stk_und, "stack underflow while jumping to a continuation: not enough arguments on stack"};
+      } else if (pass_args < depth) {
+        get_stack().drop_bottom(depth - pass_args);
+        consume_stack_gas(pass_args);
       }
-      get_stack().drop_bottom(depth - pass_args);
     }
     return jump_to(std::move(cont));
   }
@@ -303,6 +315,7 @@ Ref<OrdCont> VmState::extract_cc(int save_cr, int stack_copy, int cc_args) {
   } else if (stack_copy > 0) {
     stack->check_underflow(stack_copy);
     new_stk = get_stack().split_top(stack_copy);
+    consume_stack_gas(new_stk);
   } else {
     new_stk = Ref<Stack>{true};
   }
@@ -332,7 +345,7 @@ int VmState::throw_exception(int excno) {
   stack_ref.push_smallint(0);
   stack_ref.push_smallint(excno);
   code.clear();
-  consume_gas(exception_gas_price);
+  gas.consume_chk(exception_gas_price);
   return jump(get_c2());
 }
 
@@ -342,7 +355,7 @@ int VmState::throw_exception(int excno, StackEntry&& arg) {
   stack_ref.push(std::move(arg));
   stack_ref.push_smallint(excno);
   code.clear();
-  consume_gas(exception_gas_price);
+  gas.consume_chk(exception_gas_price);
   return jump(get_c2());
 }
 
@@ -385,11 +398,13 @@ int VmState::step() {
   if (code->size()) {
     return dispatch->dispatch(this, code.write());
   } else if (code->size_refs()) {
-    VM_LOG(this) << "execute implicit JMPREF\n";
+    VM_LOG(this) << "execute implicit JMPREF";
+    gas.consume_chk(implicit_jmpref_gas_price);
     Ref<Continuation> cont = Ref<OrdCont>{true, load_cell_slice_ref(code->prefetch_ref()), get_cp()};
     return jump(std::move(cont));
   } else {
-    VM_LOG(this) << "execute implicit RET\n";
+    VM_LOG(this) << "execute implicit RET";
+    gas.consume_chk(implicit_ret_gas_price);
     return ret();
   }
 }
@@ -401,28 +416,27 @@ int VmState::run() {
   int res;
   Guard guard(this);
   do {
-    // LOG(INFO) << "[BS] data cells: " << DataCell::get_total_data_cells();
     try {
       try {
-        res = step();
-        gas.check();
-      } catch (vm::CellBuilder::CellWriteError) {
-        throw VmError{Excno::cell_ov};
-      } catch (vm::CellBuilder::CellCreateError) {
-        throw VmError{Excno::cell_ov};
-      } catch (vm::CellSlice::CellReadError) {
-        throw VmError{Excno::cell_und};
-      }
-    } catch (const VmError& vme) {
-      VM_LOG(this) << "handling exception code " << vme.get_errno() << ": " << vme.get_msg();
-      try {
-        // LOG(INFO) << "[EX] data cells: " << DataCell::get_total_data_cells();
-        ++steps;
-        res = throw_exception(vme.get_errno());
-      } catch (const VmError& vme2) {
-        VM_LOG(this) << "exception " << vme2.get_errno() << " while handling exception: " << vme.get_msg();
-        // LOG(INFO) << "[EXX] data cells: " << DataCell::get_total_data_cells();
-        return ~vme2.get_errno();
+        try {
+          res = step();
+          gas.check();
+        } catch (vm::CellBuilder::CellWriteError) {
+          throw VmError{Excno::cell_ov};
+        } catch (vm::CellBuilder::CellCreateError) {
+          throw VmError{Excno::cell_ov};
+        } catch (vm::CellSlice::CellReadError) {
+          throw VmError{Excno::cell_und};
+        }
+      } catch (const VmError& vme) {
+        VM_LOG(this) << "handling exception code " << vme.get_errno() << ": " << vme.get_msg();
+        try {
+          ++steps;
+          res = throw_exception(vme.get_errno());
+        } catch (const VmError& vme2) {
+          VM_LOG(this) << "exception " << vme2.get_errno() << " while handling exception: " << vme.get_msg();
+          return ~vme2.get_errno();
+        }
       }
     } catch (VmNoGas vmoog) {
       ++steps;
@@ -433,11 +447,31 @@ int VmState::run() {
       return vmoog.get_errno();  // no ~ for unhandled exceptions (to make their faking impossible)
     }
   } while (!res);
-  // LOG(INFO) << "[EN] data cells: " << DataCell::get_total_data_cells();
-  if ((res | 1) == -1) {
-    commit();
+  if ((res | 1) == -1 && !try_commit()) {
+    VM_LOG(this) << "automatic commit failed (new data or action cells too deep)";
+    get_stack().clear();
+    get_stack().push_smallint(0);
+    return ~(int)Excno::cell_ov;
   }
   return res;
+}
+
+bool VmState::try_commit() {
+  if (cr.d[0].not_null() && cr.d[1].not_null() && cr.d[0]->get_depth() <= max_data_depth &&
+      cr.d[1]->get_depth() <= max_data_depth) {
+    cstate.c4 = cr.d[0];
+    cstate.c5 = cr.d[1];
+    cstate.committed = true;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+void VmState::force_commit() {
+  if (!try_commit()) {
+    throw VmError{Excno::cell_ov, "cannot commit too deep cells as new data/actions"};
+  }
 }
 
 ControlData* force_cdata(Ref<Continuation>& cont) {

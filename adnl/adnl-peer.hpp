@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
 
@@ -58,8 +58,9 @@ class AdnlPeerPairImpl : public AdnlPeerPair {
   }
 
   AdnlPeerPairImpl(td::actor::ActorId<AdnlNetworkManager> network_manager, td::actor::ActorId<AdnlPeerTable> peer_table,
-                   td::actor::ActorId<AdnlLocalId> local_actor, td::actor::ActorId<AdnlPeer> peer,
-                   td::actor::ActorId<dht::Dht> dht_node, AdnlNodeIdShort local_id, AdnlNodeIdShort peer_id);
+                   td::uint32 local_mode, td::actor::ActorId<AdnlLocalId> local_actor,
+                   td::actor::ActorId<AdnlPeer> peer, td::actor::ActorId<dht::Dht> dht_node, AdnlNodeIdShort local_id,
+                   AdnlNodeIdShort peer_id);
   void start_up() override;
   void alarm() override;
 
@@ -123,7 +124,7 @@ class AdnlPeerPairImpl : public AdnlPeerPair {
   td::Result<td::actor::ActorId<AdnlNetworkConnection>> get_conn();
   void create_channel(pubkeys::Ed25519 pub, td::uint32 date);
 
-  bool received_packet(td::uint32 seqno) const {
+  bool received_packet(td::uint64 seqno) const {
     CHECK(seqno > 0);
     if (seqno + 64 <= in_seqno_) {
       return true;
@@ -134,7 +135,7 @@ class AdnlPeerPairImpl : public AdnlPeerPair {
     return recv_seqno_mask_ & (1ull << (in_seqno_ - seqno));
   }
 
-  void add_received_packet(td::uint32 seqno) {
+  void add_received_packet(td::uint64 seqno) {
     CHECK(!received_packet(seqno));
     if (seqno <= in_seqno_) {
       recv_seqno_mask_ |= (1ull << (in_seqno_ - seqno));
@@ -232,6 +233,8 @@ class AdnlPeerPairImpl : public AdnlPeerPair {
 
   std::map<AdnlQueryId, td::actor::ActorId<AdnlQuery>> out_queries_;
 
+  td::uint32 mode_;
+
   td::uint32 received_messages_ = 0;
   bool received_from_db_ = false;
   bool received_from_static_nodes_ = false;
@@ -244,15 +247,16 @@ class AdnlPeerPairImpl : public AdnlPeerPair {
 
 class AdnlPeerImpl : public AdnlPeer {
  public:
-  void receive_packet(AdnlNodeIdShort dst, td::actor::ActorId<AdnlLocalId> dst_actor, AdnlPacket packet) override;
-  void send_messages(AdnlNodeIdShort src, td::actor::ActorId<AdnlLocalId> src_actor,
+  void receive_packet(AdnlNodeIdShort dst, td::uint32 dst_mode, td::actor::ActorId<AdnlLocalId> dst_actor,
+                      AdnlPacket packet) override;
+  void send_messages(AdnlNodeIdShort src, td::uint32 src_mode, td::actor::ActorId<AdnlLocalId> src_actor,
                      std::vector<AdnlMessage> messages) override;
-  void send_query(AdnlNodeIdShort src, td::actor::ActorId<AdnlLocalId> src_actor, std::string name,
+  void send_query(AdnlNodeIdShort src, td::uint32 src_mode, td::actor::ActorId<AdnlLocalId> src_actor, std::string name,
                   td::Promise<td::BufferSlice> promise, td::Timestamp timeout, td::BufferSlice data) override;
 
   void del_local_id(AdnlNodeIdShort local_id) override;
   void update_id(AdnlNodeIdFull id) override;
-  void update_addr_list(AdnlNodeIdShort local_id, td::actor::ActorId<AdnlLocalId> local_actor,
+  void update_addr_list(AdnlNodeIdShort local_id, td::uint32 local_mode, td::actor::ActorId<AdnlLocalId> local_actor,
                         AdnlAddressList addr_list) override;
   void update_dht_node(td::actor::ActorId<dht::Dht> dht_node) override;
   //void check_signature(td::BufferSlice data, td::BufferSlice signature, td::Promise<td::Unit> promise) override;
