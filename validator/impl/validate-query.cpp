@@ -256,7 +256,7 @@ void ValidateQuery::start_up() {
     LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
     ++pending;
     td::actor::send_closure_later(manager, &ValidatorManager::wait_block_state_short, prev_blocks[i], priority(),
-                                  timeout, [ self = get_self(), i ](td::Result<Ref<ShardState>> res)->void {
+                                  timeout, [self = get_self(), i](td::Result<Ref<ShardState>> res) -> void {
                                     LOG(DEBUG) << "got answer to wait_block_state_short query #" << i;
                                     td::actor::send_closure_later(
                                         std::move(self), &ValidateQuery::after_get_shard_state, i, std::move(res));
@@ -270,16 +270,16 @@ void ValidateQuery::start_up() {
   // 5. request masterchain state referred to in the block
   if (!is_masterchain()) {
     ++pending;
-    td::actor::send_closure_later(manager, &ValidatorManager::wait_block_state_short, mc_blkid_, priority(),
-                                  timeout, [self = get_self()](td::Result<Ref<ShardState>> res) {
+    td::actor::send_closure_later(manager, &ValidatorManager::wait_block_state_short, mc_blkid_, priority(), timeout,
+                                  [self = get_self()](td::Result<Ref<ShardState>> res) {
                                     LOG(DEBUG) << "got answer to wait_block_state() query for masterchain block";
                                     td::actor::send_closure_later(std::move(self), &ValidateQuery::after_get_mc_state,
                                                                   std::move(res));
                                   });
     // 5.1. request corresponding block handle
     ++pending;
-    td::actor::send_closure_later(manager, &ValidatorManager::get_block_handle, mc_blkid_,
-                                  true, [self = get_self()](td::Result<BlockHandle> res) {
+    td::actor::send_closure_later(manager, &ValidatorManager::get_block_handle, mc_blkid_, true,
+                                  [self = get_self()](td::Result<BlockHandle> res) {
                                     LOG(DEBUG) << "got answer to get_block_handle() query for masterchain block";
                                     td::actor::send_closure_later(std::move(self), &ValidateQuery::got_mc_handle,
                                                                   std::move(res));
@@ -679,6 +679,17 @@ bool ValidateQuery::try_unpack_mc_state() {
     config_->set_block_id_ext(mc_blkid_);
     ihr_enabled_ = config_->ihr_enabled();
     create_stats_enabled_ = config_->create_stats_enabled();
+    if (config_->has_capabilities() && (config_->get_capabilities() & ~supported_capabilities())) {
+      LOG(ERROR) << "block generation capabilities " << config_->get_capabilities()
+                 << " have been enabled in global configuration, but we support only " << supported_capabilities()
+                 << " (upgrade validator software?)";
+    }
+    if (config_->get_global_version() > supported_version()) {
+      LOG(ERROR) << "block version " << config_->get_global_version()
+                 << " have been enabled in global configuration, but we support only " << supported_version()
+                 << " (upgrade validator software?)";
+    }
+
     old_shard_conf_ = std::make_unique<block::ShardConfig>(*config_);
     if (!is_masterchain()) {
       new_shard_conf_ = std::make_unique<block::ShardConfig>(*config_);
@@ -728,6 +739,7 @@ bool ValidateQuery::try_unpack_mc_state() {
 
 // almost the same as in Collator
 bool ValidateQuery::fetch_config_params() {
+  old_mparams_ = config_->get_config_param(9);
   {
     auto res = config_->get_storage_prices();
     if (res.is_error()) {
@@ -771,6 +783,7 @@ bool ValidateQuery::fetch_config_params() {
         block::MsgPrices{rec.lump_price,           rec.bit_price,          rec.cell_price, rec.ihr_price_factor,
                          (unsigned)rec.first_frac, (unsigned)rec.next_frac};
     action_phase_cfg_.workchains = &config_->get_workchain_list();
+    action_phase_cfg_.bounce_msg_body = (config_->has_capability(ton::capBounceMsgBody) ? 256 : 0);
   }
   {
     // fetch block_grams_created
@@ -1192,7 +1205,7 @@ bool ValidateQuery::request_neighbor_queues() {
     LOG(DEBUG) << "neighbor #" << i << " : " << descr.blk_.to_str();
     ++pending;
     send_closure_later(manager, &ValidatorManager::wait_block_message_queue_short, descr.blk_, priority(), timeout,
-                       [ self = get_self(), i ](td::Result<Ref<MessageQueue>> res) {
+                       [self = get_self(), i](td::Result<Ref<MessageQueue>> res) {
                          td::actor::send_closure(std::move(self), &ValidateQuery::got_neighbor_out_queue, i,
                                                  std::move(res));
                        });
@@ -1310,12 +1323,13 @@ bool ValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ
   CHECK(blkid.is_valid_ext() && blkid.is_masterchain());
   LOG(DEBUG) << "sending auxiliary wait_block_state() query for " << blkid.to_str() << " to Manager";
   ++pending;
-  td::actor::send_closure_later(manager, &ValidatorManager::wait_block_state_short, blkid, priority(), timeout, [
-    self = get_self(), blkid
-  ](td::Result<Ref<ShardState>> res) {
-    LOG(DEBUG) << "got answer to wait_block_state query for " << blkid.to_str();
-    td::actor::send_closure_later(std::move(self), &ValidateQuery::after_get_aux_shard_state, blkid, std::move(res));
-  });
+  td::actor::send_closure_later(manager, &ValidatorManager::wait_block_state_short, blkid, priority(), timeout,
+                                [self = get_self(), blkid](td::Result<Ref<ShardState>> res) {
+                                  LOG(DEBUG) << "got answer to wait_block_state query for " << blkid.to_str();
+                                  td::actor::send_closure_later(std::move(self),
+                                                                &ValidateQuery::after_get_aux_shard_state, blkid,
+                                                                std::move(res));
+                                });
   state.clear();
   return true;
 }
@@ -1654,8 +1668,8 @@ bool ValidateQuery::check_shard_layout() {
   WorkchainId wc_id{ton::workchainInvalid};
   Ref<block::WorkchainInfo> wc_info;
 
-  if (!new_shard_conf_->process_sibling_shard_hashes([ self = this, &wc_set, &wc_id, &wc_info, &ccvc ](
-          block::McShardHash & cur, const block::McShardHash* sibling) {
+  if (!new_shard_conf_->process_sibling_shard_hashes([self = this, &wc_set, &wc_id, &wc_info, &ccvc](
+                                                         block::McShardHash& cur, const block::McShardHash* sibling) {
         if (!cur.is_valid()) {
           return -2;
         }
@@ -2313,14 +2327,14 @@ bool ValidateQuery::precheck_account_updates() {
   LOG(INFO) << "pre-checking all Account updates between the old and the new state";
   try {
     CHECK(ps_.account_dict_ && ns_.account_dict_);
-    if (!ps_.account_dict_->scan_diff(*ns_.account_dict_,
-                                      [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
-                                             Ref<vm::CellSlice> new_val_extra) {
-                                        CHECK(key_len == 256);
-                                        return precheck_one_account_update(key, std::move(old_val_extra),
-                                                                           std::move(new_val_extra));
-                                      },
-                                      3 /* check augmentation of changed nodes */)) {
+    if (!ps_.account_dict_->scan_diff(
+            *ns_.account_dict_,
+            [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
+                   Ref<vm::CellSlice> new_val_extra) {
+              CHECK(key_len == 256);
+              return precheck_one_account_update(key, std::move(old_val_extra), std::move(new_val_extra));
+            },
+            3 /* check augmentation of changed nodes */)) {
       return reject_query("invalid ShardAccounts dictionary in the new state");
     }
   } catch (vm::VmError& err) {
@@ -2674,14 +2688,14 @@ bool ValidateQuery::precheck_message_queue_update() {
   try {
     CHECK(ps_.out_msg_queue_ && ns_.out_msg_queue_);
     CHECK(out_msg_dict_);
-    if (!ps_.out_msg_queue_->scan_diff(*ns_.out_msg_queue_,
-                                       [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
-                                              Ref<vm::CellSlice> new_val_extra) {
-                                         CHECK(key_len == 352);
-                                         return precheck_one_message_queue_update(key, std::move(old_val_extra),
-                                                                                  std::move(new_val_extra));
-                                       },
-                                       3 /* check augmentation of changed nodes */)) {
+    if (!ps_.out_msg_queue_->scan_diff(
+            *ns_.out_msg_queue_,
+            [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
+                   Ref<vm::CellSlice> new_val_extra) {
+              CHECK(key_len == 352);
+              return precheck_one_message_queue_update(key, std::move(old_val_extra), std::move(new_val_extra));
+            },
+            3 /* check augmentation of changed nodes */)) {
       return reject_query("invalid OutMsgQueue dictionary in the new state");
     }
   } catch (vm::VmError& err) {
@@ -4660,21 +4674,22 @@ bool ValidateQuery::check_one_library_update(td::ConstBitPtr key, Ref<vm::CellSl
   } else {
     old_publishers = std::make_unique<vm::Dictionary>(256);
   }
-  if (!old_publishers->scan_diff(*new_publishers,
-                                 [ this, lib_key = key ](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val,
-                                                         Ref<vm::CellSlice> new_val) {
-                                   CHECK(key_len == 256);
-                                   if (old_val.not_null() && !old_val->empty_ext()) {
-                                     return false;
-                                   }
-                                   if (new_val.not_null() && !new_val->empty_ext()) {
-                                     return false;
-                                   }
-                                   CHECK(old_val.not_null() != new_val.not_null());
-                                   lib_publishers2_.emplace_back(lib_key, key, new_val.not_null());
-                                   return true;
-                                 },
-                                 3 /* check augmentation of changed nodes */)) {
+  if (!old_publishers->scan_diff(
+          *new_publishers,
+          [this, lib_key = key](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val,
+                                Ref<vm::CellSlice> new_val) {
+            CHECK(key_len == 256);
+            if (old_val.not_null() && !old_val->empty_ext()) {
+              return false;
+            }
+            if (new_val.not_null() && !new_val->empty_ext()) {
+              return false;
+            }
+            CHECK(old_val.not_null() != new_val.not_null());
+            lib_publishers2_.emplace_back(lib_key, key, new_val.not_null());
+            return true;
+          },
+          3 /* check augmentation of changed nodes */)) {
     return reject_query("invalid publishers set for shard library with hash "s + key.to_hex(256));
   }
   return true;
@@ -4804,7 +4819,7 @@ bool ValidateQuery::check_config_update(Ref<vm::CellSlice> old_conf_params, Ref<
   Ref<vm::Cell> old_cfg_root, new_cfg_root;
   CHECK(block::gen::t_ConfigParams.unpack_cons1(old_conf_params.write(), old_cfg_addr, old_cfg_root) &&
         block::gen::t_ConfigParams.unpack_cons1(new_conf_params.write(), new_cfg_addr, new_cfg_root));
-  if (!block::valid_config_data(new_cfg_root, new_cfg_addr, true)) {
+  if (!block::valid_config_data(new_cfg_root, new_cfg_addr, true, false, old_mparams_)) {
     return reject_query(
         "new configuration parameters failed to pass per-parameter automated validity checks, or one of mandatory "
         "configuration parameters is missing");
@@ -4829,9 +4844,9 @@ bool ValidateQuery::check_config_update(Ref<vm::CellSlice> old_conf_params, Ref<
         "the new configuration is different from that stored in the persistent data of the (new) configuration smart contract "s +
         old_cfg_addr.to_hex());
   }
-  if (!block::valid_config_data(ocfg_root, old_cfg_addr, true, true)) {
+  if (!block::valid_config_data(ocfg_root, old_cfg_addr, true, true, old_mparams_)) {
     return reject_query("configuration extracted from (old) configuration smart contract "s + old_cfg_addr.to_hex() +
-                        " failed to pass per-parameted validity checks, or one of mandatory parameters is missing");
+                        " failed to pass per-parameter validity checks, or one of mandatory parameters is missing");
   }
   if (block::important_config_parameters_changed(new_cfg_root, old_cfg_root)) {
     // same as the check in Collator::create_mc_state_extra()
@@ -4883,7 +4898,7 @@ bool ValidateQuery::check_config_update(Ref<vm::CellSlice> old_conf_params, Ref<
     return true;
   }
   auto wcfg_root = wcfg_res.move_as_ok();
-  if (!block::valid_config_data(wcfg_root, want_cfg_addr, true)) {
+  if (!block::valid_config_data(wcfg_root, want_cfg_addr, true, false, old_mparams_)) {
     LOG(WARNING)
         << "switching of configuration smart contract did not happen because the configuration extracted from "
            "suggested new configuration smart contract "
@@ -4996,14 +5011,15 @@ bool ValidateQuery::check_mc_state_extra() {
   try {
     vm::AugmentedDictionary old_prev_dict{old_extra.r1.prev_blocks, 32, block::tlb::aug_OldMcBlocksInfo};
     vm::AugmentedDictionary new_prev_dict{new_extra.r1.prev_blocks, 32, block::tlb::aug_OldMcBlocksInfo};
-    if (!old_prev_dict.scan_diff(new_prev_dict,
-                                 [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
-                                        Ref<vm::CellSlice> new_val_extra) {
-                                   CHECK(key_len == 32);
-                                   return check_one_prev_dict_update(
-                                       (unsigned)key.get_uint(32), std::move(old_val_extra), std::move(new_val_extra));
-                                 },
-                                 3 /* check augmentation of changed nodes */)) {
+    if (!old_prev_dict.scan_diff(
+            new_prev_dict,
+            [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
+                   Ref<vm::CellSlice> new_val_extra) {
+              CHECK(key_len == 32);
+              return check_one_prev_dict_update((unsigned)key.get_uint(32), std::move(old_val_extra),
+                                                std::move(new_val_extra));
+            },
+            3 /* check augmentation of changed nodes */)) {
       return reject_query("invalid previous block dictionary in the new state");
     }
     td::BitArray<32> key;
