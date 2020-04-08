@@ -1,21 +1,30 @@
 #!/usr/bin/fift -s
+"Asm.fif" include
 "TonUtil.fif" include
 "GetOpt.fif" include
 
-{ show-options-help 1 halt } : usage
+// only the next three lines differ in elector/configuration smart contract upgrades
+"configuration" =: name
+"auto/config-code.fif" =: src-file
+-1000 =: param-idx
+
 86400 30 * =: expire-in
-false =: critical
+true =: critical
 -1 =: old-hash
 
+{ show-options-help 1 halt } : usage
+{ name $+ } : +name
+
 begin-options
-     " <index> <new-value-boc> [-x <expire-in>] [-c] [-H <old-hash>] [<savefile>]" +cr +tab
-    +"Creates a new configuration proposal for setting configuration parameter <index> to <new-value-boc> (`null` means no new value), "
+     " [-s <fift-asm-code>] [-x <expire-in>] [-H <old-hash>] [<savefile>]" +cr +tab
+    +"Creates a new configuration proposal for upgrading the " +name +" smart contract code to <fift-asm-code> ('" src-file $+ +"' by default), "
     +"and saves it as an internal message body into <savefile>.boc ('config-msg-body.boc' by default)"
      disable-digit-options generic-help-setopt
-  "c" "--critical" { true =: critical } short-long-option
-    "Creates a critical parameter change proposal" option-help
   "x" "--expires-in" { parse-int =: expire-in } short-long-option-arg
     "Sets proposal expiration time in seconds (default " expire-in (.) $+ +")" option-help
+  "s" "--source" { =: src-file } short-long-option-arg
+    "Fift assembler source file for the new " +name +" smart contract code ('"
+    src-file $+ +"' by default)" option-help
   "H" "--old-hash" { (hex-number) not abort"256-bit hex number expected as hash" =: old-hash }
      short-long-option-arg
      "Sets the required cell hash of existing parameter value (0 means no value)" option-help 
@@ -23,28 +32,20 @@ begin-options
     "Shows a help message" option-help
 parse-options
 
-$# dup 2 < swap 3 > or ' usage if
-3 :$1..n
+$# 1 > ' usage if
+1 :$1..n
 
-$1 parse-int dup =: param-idx
-  32 fits not abort"parameter index out of range"
-$2 =: boc-filename
-$3 "config-msg-body.boc" replace-if-null =: savefile
+$1 "config-msg-body.boc" replace-if-null =: savefile
 expire-in now + =: expire-at
 
-boc-filename dup "null" $= {
-  ."New value of configuration parameter" param-idx . ."is null" cr drop null
-} {
-  ."Loading new value of configuration parameter " param-idx . ."from file " dup type cr
-  boc-filename file>B B>boc
-  dup <s csr. cr
-} cond
-=: param-value
-
-param-value param-idx is-valid-config? not abort"not a valid value for chosen configuration parameter"
+."Assembling new " name type ." smart contract code from " src-file type cr
+src-file include
+dup <s 12 u@ 0xFF0 <> abort"not valid smart contract code"
+<b swap ref, b> =: param-value
 
 critical { ."Critical" } { ."Non-critical" } cond
-." configuration proposal will expire at " expire-at . ."(in " expire-in . ."seconds)" cr
+." configuration proposal for configuration parameter " param-idx .
+."will expire at " expire-at . ."(in " expire-in . ."seconds)" cr
 
 now 32 << param-idx + =: query-id
 ."Query id is " query-id . cr
@@ -57,11 +58,8 @@ now 32 << param-idx + =: query-id
 
 dup ."resulting internal message body: " <s csr. cr
 2 boc+>B dup Bx. cr
-
-param-value dup null? { drop } {
-  totalcsize swap ."(a total of " . ."data bits, " . ."cell references -> " 
-  drop dup Blen . ."BoC data bytes)" cr
-} cond
+param-value totalcsize swap ."(a total of " . ."data bits, " . ."cell references -> "
+drop dup Blen . ."BoC data bytes)" cr
 
 savefile tuck B>file
 ."(Saved to file " type .")" cr

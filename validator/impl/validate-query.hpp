@@ -108,10 +108,10 @@ inline ErrorCtxSet ErrorCtx::set_guard(std::vector<std::string> str_list) {
 
 class ValidateQuery : public td::actor::Actor {
   static constexpr int supported_version() {
-    return 1;
+    return 2;
   }
   static constexpr long long supported_capabilities() {
-    return ton::capCreateStatsEnabled | ton::capBounceMsgBody | ton::capReportVersion;
+    return ton::capCreateStatsEnabled | ton::capBounceMsgBody | ton::capReportVersion | ton::capShortDequeue;
   }
 
  public:
@@ -143,6 +143,8 @@ class ValidateQuery : public td::actor::Actor {
   bool update_shard_cc_{false};
   bool is_fake_{false};
   bool prev_key_block_exists_{false};
+  bool debug_checks_{false};
+  bool outq_cleanup_partial_{false};
   BlockSeqno prev_key_seqno_{~0u};
   int stage_{0};
   td::BitArray<64> shard_pfx_;

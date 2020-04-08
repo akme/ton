@@ -43,6 +43,7 @@
 4 constant capBounceMsgBody
 8 constant capReportVersion
 16 constant capSplitMergeTransactions
+32 constant capShortDequeue
 
 // max-validators masterchain-validators min-validators --
 { swap rot <b swap 16 u, swap 16 u, swap 16 u, b> 16 config! } : config.validator_num!
@@ -108,6 +109,10 @@ variable special-dict
 // normal-prop-params critical-prop-params --
 { swap cfg-prop-setup swap cfg-prop-setup <b x{91} s, rot ref, swap ref, b> } : make-proposals-setup
 { make-proposals-setup 11 config! } : config.param_proposals_setup!
+
+// deposit bit_pps cell_pps
+{ 3 0 reverse <b x{1a} s, swap Gram, swap Gram, swap Gram, b> } : create-complaint-pricing
+{ create-complaint-pricing 13 config! } : config.complaint_prices!
 
 // bit-pps cell-pps mc-bit-pps mc-cell-pps --
 { <b x{cc} s, 0 32 u, 4 roll 64 u, 3 roll 64 u, rot 64 u, swap 64 u,
