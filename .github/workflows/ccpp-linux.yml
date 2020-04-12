@@ -14,7 +14,7 @@ jobs:
         depth: 1
         submodules: 'recursive'
     - name: Run Cppcheck
-      uses: Bedzior/cppcheck-action@v1.0
+      uses: Bedzior/run-cppcheck@master
       with:
         enabled checks: all
         enable inconclusive: true
