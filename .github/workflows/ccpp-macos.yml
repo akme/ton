@@ -29,7 +29,7 @@ jobs:
         cd build
         make -j4
         mkdir bins
-        cp crypto/fift crypto/adjust-block crypto/dump-block crypto/tlbc crypto/func crypto/create-state validator-engine-console/validator-engine-console tonlib/tonlib-cli tonlib/libtonlibjson.so.0.5 tddb/io-bench http/http-proxy tdnet/udp_ping_pong tdnet/tcp_ping_pong rldp-http-proxy/rldp-http-proxy dht-server/dht-server lite-client/lite-client validator-engine/validator-engine utils/generate-random-id utils/pack-viewer utils/json2tlo adnl/adnl-proxy adnl/adnl-pong bins
+        cp crypto/fift crypto/adjust-block crypto/dump-block crypto/tlbc crypto/func crypto/create-state validator-engine-console/validator-engine-console tonlib/tonlib-cli tonlib/libtonlibjson* tddb/io-bench http/http-proxy tdnet/udp_ping_pong tdnet/tcp_ping_pong rldp-http-proxy/rldp-http-proxy dht-server/dht-server lite-client/lite-client validator-engine/validator-engine utils/generate-random-id utils/pack-viewer utils/json2tlo adnl/adnl-proxy adnl/adnl-pong bins
 
     - uses: actions/upload-artifact@master
       with:
