@@ -124,9 +124,6 @@ set(TON_CRYPTO_SOURCE
 
   vm/db/StaticBagOfCellsDb.h
   vm/db/StaticBagOfCellsDb.cpp
-
-  vm/db/BlobView.h
-  vm/db/BlobView.cpp
 )
 
 set(TON_DB_SOURCE
@@ -144,6 +141,7 @@ set(FIFT_SOURCE
   fift/Dictionary.cpp
   fift/Fift.cpp
   fift/IntCtx.cpp
+  fift/Continuation.cpp
   fift/SourceLookup.cpp
   fift/utils.cpp
   fift/words.cpp
@@ -151,6 +149,7 @@ set(FIFT_SOURCE
   fift/Dictionary.h
   fift/Fift.h
   fift/IntCtx.h
+  fift/Continuation.h
   fift/SourceLookup.h
   fift/utils.h
   fift/words.h
@@ -216,9 +215,7 @@ set(SMC_ENVELOPE_SOURCE
   smc-envelope/PaymentChannel.cpp
   smc-envelope/SmartContract.cpp
   smc-envelope/SmartContractCode.cpp
-  smc-envelope/TestGiver.cpp
-  smc-envelope/TestWallet.cpp
-  smc-envelope/Wallet.cpp
+  smc-envelope/WalletInterface.cpp
   smc-envelope/WalletV3.cpp
 
   smc-envelope/GenericAccount.h
@@ -228,9 +225,6 @@ set(SMC_ENVELOPE_SOURCE
   smc-envelope/MultisigWallet.h
   smc-envelope/SmartContract.h
   smc-envelope/SmartContractCode.h
-  smc-envelope/TestGiver.h
-  smc-envelope/TestWallet.h
-  smc-envelope/Wallet.h
   smc-envelope/WalletInterface.h
   smc-envelope/WalletV3.h
 )
@@ -265,10 +259,11 @@ set(FIFT_TEST_SOURCE
   PARENT_SCOPE
 )
 
+
 add_library(ton_crypto STATIC ${TON_CRYPTO_SOURCE})
 target_include_directories(ton_crypto PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(ton_crypto PUBLIC ${OPENSSL_CRYPTO_LIBRARY} tdutils)
+target_link_libraries(ton_crypto PUBLIC ${OPENSSL_CRYPTO_LIBRARY} tdutils tddb_utils)
 if (NOT WIN32)
   target_link_libraries(ton_crypto PUBLIC dl z)
 endif()
@@ -310,6 +305,12 @@ target_include_directories(tlbc PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_
 target_link_libraries(tlbc PUBLIC ton_crypto src_parser)
 if (WINGETOPT_FOUND)
   target_link_libraries_system(tlbc wingetopt)
+endif()
+
+add_executable(pow-miner util/pow-miner.cpp util/Miner.cpp util/Miner.h)
+target_link_libraries(pow-miner PUBLIC ton_crypto ton_block)
+if (WINGETOPT_FOUND)
+  target_link_libraries_system(fift wingetopt)
 endif()
 
 add_library(ton_block ${BLOCK_SOURCE})
@@ -377,6 +378,7 @@ if (NOT CMAKE_CROSSCOMPILING)
   GenFif(DEST smartcont/auto/restricted-wallet-code SOURCE smartcont/restricted-wallet-code.fc NAME restricted-wallet)
   GenFif(DEST smartcont/auto/restricted-wallet2-code SOURCE smartcont/restricted-wallet2-code.fc NAME restricted-wallet2)
   GenFif(DEST smartcont/auto/restricted-wallet3-code SOURCE smartcont/restricted-wallet3-code.fc NAME restricted-wallet3)
+  GenFif(DEST smartcont/auto/pow-testgiver-code SOURCE smartcont/pow-testgiver-code.fc NAME pow-testgiver)
 
   GenFif(DEST smartcont/auto/dns-manual-code SOURCE smartcont/dns-manual-code.fc NAME dns-manual)
   GenFif(DEST smartcont/auto/dns-auto-code SOURCE smartcont/dns-auto-code.fc NAME dns-auto)

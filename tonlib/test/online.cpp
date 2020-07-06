@@ -39,8 +39,6 @@
 #include "smc-envelope/GenericAccount.h"
 #include "smc-envelope/ManualDns.h"
 #include "smc-envelope/MultisigWallet.h"
-#include "smc-envelope/TestGiver.h"
-#include "smc-envelope/TestWallet.h"
 #include "tonlib/LastBlock.h"
 #include "tonlib/ExtClient.h"
 #include "tonlib/utils.h"
@@ -53,7 +51,7 @@
 #include "vm/cells/MerkleProof.h"
 
 #include "td/utils/Container.h"
-#include "td/utils/OptionsParser.h"
+#include "td/utils/OptionParser.h"
 #include "td/utils/Random.h"
 #include "td/utils/filesystem.h"
 #include "td/utils/tests.h"
@@ -182,7 +180,6 @@ AccountState get_account_state(Client& client, std::string address) {
       res.type = AccountState::Empty;
       break;
     case tonlib_api::wallet_v3_accountState::ID:
-    case tonlib_api::wallet_accountState::ID:
       res.type = AccountState::Wallet;
       break;
     case tonlib_api::dns_accountState::ID:
@@ -792,26 +789,23 @@ int main(int argc, char* argv[]) {
   td::set_default_failure_signal_handler();
   using tonlib_api::make_object;
 
-  td::OptionsParser p;
+  td::OptionParser p;
   std::string global_config_str;
   std::string giver_key_str;
   std::string giver_key_pwd = "cucumber";
   std::string keystore_dir = "test-keystore";
   bool reset_keystore_dir = false;
-  p.add_option('C', "global-config", "file to read global config", [&](td::Slice fname) {
+  p.add_checked_option('C', "global-config", "file to read global config", [&](td::Slice fname) {
     TRY_RESULT(str, td::read_file_str(fname.str()));
     global_config_str = std::move(str);
     return td::Status::OK();
   });
-  p.add_option('G', "giver-key", "file with a wallet key that should be used as a giver", [&](td::Slice fname) {
+  p.add_checked_option('G', "giver-key", "file with a wallet key that should be used as a giver", [&](td::Slice fname) {
     TRY_RESULT(str, td::read_file_str(fname.str()));
     giver_key_str = std::move(str);
     return td::Status::OK();
   });
-  p.add_option('f', "force", "reser keystore dir", [&]() {
-    reset_keystore_dir = true;
-    return td::Status::OK();
-  });
+  p.add_option('f', "force", "reser keystore dir", [&]() { reset_keystore_dir = true; });
   p.run(argc, argv).ensure();
 
   if (reset_keystore_dir) {
